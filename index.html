@@ -19,6 +19,46 @@ function gasRun(functionName, params = []) {
   })
   .then(r => r.json());
 }
+
+ function runBackend(fn, args = []) {
+  // GAS environment
+  if (typeof google !== 'undefined' && google.script && google.script.run) {
+    return {
+      withSuccessHandler(cb) {
+        this._success = cb;
+        return this;
+      },
+      withFailureHandler(cb) {
+        this._fail = cb;
+        return this;
+      },
+      exec() {
+        google.script.run
+          .withSuccessHandler(this._success || function(){})
+          .withFailureHandler(this._fail || function(){})
+          [fn](...args);
+      }
+    };
+  }
+
+  // VERCEL / BROWSER
+  return {
+    withSuccessHandler(cb) {
+      this._success = cb;
+      return this;
+    },
+    withFailureHandler(cb) {
+      this._fail = cb;
+      return this;
+    },
+    exec() {
+      gasRun(fn, args)
+        .then(r => (this._success || function(){})(r))
+        .catch(e => (this._fail || function(){})(e));
+    }
+  };
+}
+
 </script>
 
   <style>
@@ -832,15 +872,18 @@ function removeDraftFromList(draftId) {
 
   // 🔥 OPTIMISTIC UI: hapus draft langsung dari tampilan
   removeDraftFromList(draftId);
-
-  gasRun('deleteTransaksi', [draftId])
-  .then(function(result) {
+runBackend('deleteTransaksi', [draftId])
+  .withSuccessHandler(function(result) {
     if (result.success) {
       showToast('Draft berhasil dihapus!', 'success');
     } else {
       loadAllDrafts();
     }
-  });
+  })
+  .withFailureHandler(function() {
+    loadAllDrafts();
+  })
+  .exec();
 
 }
 
@@ -1071,8 +1114,8 @@ if (status === 'submitted' && !currentPhoto) {
 
 
       if (currentDraftId) {
-        google.script.run
-          .withSuccessHandler(function(result) {
+        runBackend('updateTransaksi', [currentDraftId, data])
+  .withSuccessHandler(function(result) {
             submitBtnText.textContent = originalSubmitText;
             draftBtnText.textContent = originalDraftText;
             submitBtn.disabled = false;
@@ -1105,10 +1148,11 @@ if (status === 'submitted' && !currentPhoto) {
             draftBtn.disabled = false;
             showToast('Error: ' + error, 'error');
           })
+           .exec();
           .updateTransaksi(currentDraftId, data);
       } else {
-        google.script.run
-          .withSuccessHandler(function(result) {
+        runBackend('createTransaksi', [data])
+  .withSuccessHandler(function(result) {
             submitBtnText.textContent = originalSubmitText;
             draftBtnText.textContent = originalDraftText;
             submitBtn.disabled = false;
@@ -1136,6 +1180,7 @@ if (status === 'submitted' && !currentPhoto) {
             draftBtn.disabled = false;
             showToast('Error: ' + error, 'error');
           })
+         .exec();
           .createTransaksi(data);
       }
     }
@@ -1212,8 +1257,8 @@ function highlight(text, keyword) {
         return;
       }
 
-       google.script.run
-    .withSuccessHandler(function (data) {
+       runBackend('getLaporanByPeriod', [startDate, endDate])
+  .withSuccessHandler(function (data) {
   allPeriodTransactions = data;
   adminSuggestions = buildAdminSuggestions(data);
 
@@ -1229,6 +1274,7 @@ function highlight(text, keyword) {
         .withFailureHandler(function(error) {
           showToast('Error loading report: ' + error, 'error');
         })
+        .exec();
         .getLaporanByPeriod(startDate, endDate);
     }
 
@@ -1991,8 +2037,8 @@ async function openCamera() {
 
 // Tutup kamera (aman dipanggil berulang)
 function stopCamera() {
-  if (!cameraStream) return;
-  cameraStream.getTracks().forEach(track => track.stop());
+  if (typeof cameraStream === 'undefined' || !cameraStream) return;
+  cameraStream.getTracks().forEach(t => t.stop());
   cameraStream = null;
 }
   const wrap = document.getElementById('cameraWrap');
@@ -2073,3 +2119,4 @@ document.addEventListener('click', function (e) {
  </body>
 
 </html>
+
