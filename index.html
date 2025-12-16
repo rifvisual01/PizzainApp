@@ -418,6 +418,26 @@ function gasRun(functionName, params = []) {
    </div>
   </div>
   <script>
+   
+   // ===============================
+// GAS COMPATIBILITY SHIM
+// ===============================
+if (typeof google === 'undefined') {
+  window.google = {
+    script: {
+      run: {
+        withSuccessHandler: function () {
+          return this;
+        },
+        withFailureHandler: function () {
+          return this;
+        }
+      }
+    }
+  };
+}
+
+
     // Variabel Global
     // Variabel Global
 let items = [];          // BAHAN BAKU (lama, jangan dihapus)
@@ -1971,10 +1991,10 @@ async function openCamera() {
 
 // Tutup kamera (aman dipanggil berulang)
 function stopCamera() {
-  if (cameraStream) {
-    cameraStream.getTracks().forEach(t => t.stop());
-    cameraStream = null;
-  }
+  if (!cameraStream) return;
+  cameraStream.getTracks().forEach(track => track.stop());
+  cameraStream = null;
+}
   const wrap = document.getElementById('cameraWrap');
   if (wrap) wrap.classList.add('hidden');
 }
@@ -2051,4 +2071,5 @@ document.addEventListener('click', function (e) {
 
   </script>
  </body>
+
 </html>
