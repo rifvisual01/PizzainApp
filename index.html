@@ -884,7 +884,6 @@ runBackend('deleteTransaksi', [draftId])
     loadAllDrafts();
   })
   .exec();
-
 }
 
     function loadDraftToForm(draft) {
@@ -1149,7 +1148,7 @@ if (status === 'submitted' && !currentPhoto) {
             showToast('Error: ' + error, 'error');
           })
            .exec();
-          .updateTransaksi(currentDraftId, data);
+       
       } else {
         runBackend('createTransaksi', [data])
   .withSuccessHandler(function(result) {
@@ -1181,7 +1180,6 @@ if (status === 'submitted' && !currentPhoto) {
             showToast('Error: ' + error, 'error');
           })
          .exec();
-          .createTransaksi(data);
       }
     }
 
@@ -2119,4 +2117,5 @@ document.addEventListener('click', function (e) {
  </body>
 
 </html>
+
 
