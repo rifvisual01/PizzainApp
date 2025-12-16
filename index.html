@@ -1463,60 +1463,52 @@ operasional.forEach(function(item) {
     }
 
     function drawChart(dailyData) {
-      const canvas = document.getElementById('chartCanvas');
-      canvas.innerHTML = '';
+  const canvas = document.getElementById('chartCanvas');
+  canvas.innerHTML = '';
 
-      if (dailyData.length === 0) return;
+  if (!dailyData || dailyData.length === 0) return;
 
-      const maxValue = Math.max.apply(Math, dailyData.map(function(d) { return d.total; }));
-      const chartHeight = 240;
-      const chartPadding = 40;
-      const barWidth = Math.min(60, (canvas.offsetWidth - chartPadding * 2) / dailyData.length - 10);
+  const maxValue = Math.max(...dailyData.map(d => d.total));
+  const chartHeight = 240;
+  const chartPadding = 40;
+  const barGap = 10;
 
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('width', '100%');
-      svg.setAttribute('height', chartHeight);
-      svg.setAttribute('viewBox', '0 0 ' + canvas.offsetWidth + ' ' + chartHeight);
+  const width = canvas.offsetWidth || 300;
+  const barWidth = Math.min(
+    60,
+    (width - chartPadding * 2) / dailyData.length - barGap
+  );
 
-      const primaryColor = '#DC2626';
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', chartHeight);
+  svg.setAttribute('viewBox', `0 0 ${width} ${chartHeight}`);
 
-      dailyData.forEach(function(data, index) {
-        const barHeight = (data.total / maxValue) * (chartHeight - chartPadding - 30);
-        const x = chartPadding + index * (barWidth + 10);
-        const y = chartHeight - chartPadding - barHeight;
+  const primaryColor = '#DC2626';
 
-        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect.setAttribute('x', x);
-        rect.setAttribute('y', y);
-        rect.setAttribute('width', barWidth);
-        rect.setAttribute('height', barHeight);
-        rect.setAttribute('fill', primaryColor);
-        rect.setAttribute('rx', '6');
-        rect.classList.add('hover:opacity-80', 'transition-opacity', 'cursor-pointer');
-        svg.appendChild(rect);
+  dailyData.forEach((data, index) => {
+    const barHeight =
+      maxValue === 0
+        ? 0
+        : (data.total / maxValue) * (chartHeight - chartPadding - 30);
 
-        const valueText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        valueText.setAttribute('x', x + barWidth / 2);
-        valueText.setAttribute('y', y - 5);
-        valueText.setAttribute('text-anchor', 'middle');
-        valueText.setAttribute('fill', '#374151');
-        valueText.setAttribute('font-size', '11');
-        valueText.setAttribute('font-weight', 'bold');
-        valueText.textContent = (data.total / 1000).toFixed(0) + 'k';
-        svg.appendChild(valueText);
+    const x = chartPadding + index * (barWidth + barGap);
+    const y = chartHeight - chartPadding - barHeight;
 
-        const dateText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        dateText.setAttribute('x', x + barWidth / 2);
-        dateText.setAttribute('y', chartHeight - chartPadding + 15);
-        dateText.setAttribute('text-anchor', 'middle');
-        dateText.setAttribute('fill', '#6B7280');
-        dateText.setAttribute('font-size', '10');
-        dateText.textContent = data.label;
-        svg.appendChild(dateText);
-      });
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', x);
+    rect.setAttribute('y', y);
+    rect.setAttribute('width', barWidth);
+    rect.setAttribute('height', barHeight);
+    rect.setAttribute('rx', 6);
+    rect.setAttribute('fill', primaryColor);
 
-      canvas.appendChild(svg);
-    }
+    svg.appendChild(rect);
+  });
+
+  canvas.appendChild(svg);
+}
+
 
     /**
      * ⭐ PERUBAHAN UTAMA: Render daily cards dengan design red card
@@ -2116,6 +2108,7 @@ document.addEventListener('click', function (e) {
  </body>
 
 </html>
+
 
 
 
