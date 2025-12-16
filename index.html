@@ -454,22 +454,26 @@ const clearBtn = document.getElementById('clearAdminSearchBtn');
 
 
     let searchTimer;
-adminInput.addEventListener('input', function () {
-  clearTimeout(searchTimer);
-  const value = this.value;
+if (adminInput) {
+  adminInput.addEventListener('input', function () {
+    clearTimeout(searchTimer);
+    const value = this.value;
 
-  searchTimer = setTimeout(() => {
-    handleAdminSearch(value);
-  }, 150);
-});
+    searchTimer = setTimeout(() => {
+      handleAdminSearch(value);
+    }, 150);
+  });
+}
 
+if (clearBtn) {
+  clearBtn.addEventListener('click', function () {
+    adminInput.value = '';
+    adminSuggestBox.classList.add('hidden');
+    this.classList.add('hidden');
+    filterTransactions('');
+  });
+}
 
-clearBtn.addEventListener('click', function () {
-  adminInput.value = '';
-  adminSuggestBox.classList.add('hidden');
-  this.classList.add('hidden');
-  filterTransactions('');
-});
 
 function normalizeDriveImage(url) {
   if (!url) return '';
@@ -1215,22 +1219,20 @@ function highlight(text, keyword) {
 
        callAPI('getLaporanByPeriod', [startDate, endDate])
   .then(function (data) {
-  allPeriodTransactions = data;
-  adminSuggestions = buildAdminSuggestions(data);
+    allPeriodTransactions = data;
+    adminSuggestions = buildAdminSuggestions(data);
 
-  // 🔥 RESET SEARCH STATE
-  currentSearchKeyword = '';
-  adminInput.value = '';
-  adminSuggestBox.classList.add('hidden');
-  clearBtn.classList.add('hidden');
+    currentSearchKeyword = '';
+    adminInput.value = '';
+    adminSuggestBox.classList.add('hidden');
+    clearBtn.classList.add('hidden');
 
-  renderReport(data);
-})
+    renderReport(data);
+  })
+  .catch(function (error) {
+    showToast('Error loading report', 'error');
+  });
 
-        .withFailureHandler(function(error) {
-          showToast('Error loading report: ' + error, 'error');
-        })
-        .exec();
     }
 
 
@@ -1811,13 +1813,6 @@ ${operasional.length === 0
       }
     }
 
-function stopCamera() {
-  if (window.cameraStream) {
-    window.cameraStream.getTracks().forEach(t => t.stop());
-    window.cameraStream = null;
-  }
-}
-
     function initEventListeners() {
       document.getElementById('btnCatatPengeluaran').addEventListener('click', function() {
         resetForm();
@@ -2062,11 +2057,19 @@ document.addEventListener('click', function (e) {
   }
 });
 
+   function stopCamera() {
+  if (window.cameraStream) {
+    window.cameraStream.getTracks().forEach(t => t.stop());
+    window.cameraStream = null;
+  }
+}
+
 
   </script>
  </body>
 
 </html>
+
 
 
 
