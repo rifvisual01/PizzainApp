@@ -20,44 +20,16 @@ function gasRun(functionName, params = []) {
   .then(r => r.json());
 }
 
- function runBackend(fn, args = []) {
-  // GAS environment
-  if (typeof google !== 'undefined' && google.script && google.script.run) {
-    return {
-      withSuccessHandler(cb) {
-        this._success = cb;
-        return this;
-      },
-      withFailureHandler(cb) {
-        this._fail = cb;
-        return this;
-      },
-      exec() {
-        google.script.run
-          .withSuccessHandler(this._success || function(){})
-          .withFailureHandler(this._fail || function(){})
-          [fn](...args);
-      }
-    };
-  }
-
-  // VERCEL / BROWSER
-  return {
-    withSuccessHandler(cb) {
-      this._success = cb;
-      return this;
-    },
-    withFailureHandler(cb) {
-      this._fail = cb;
-      return this;
-    },
-    exec() {
-      gasRun(fn, args)
-        .then(r => (this._success || function(){})(r))
-        .catch(e => (this._fail || function(){})(e));
-    }
-  };
+ function callAPI(action, payload = []) {
+  return fetch(API_BASE, {
+    method: 'POST',
+    body: new URLSearchParams({
+      action,
+      payload: JSON.stringify(payload)
+    })
+  }).then(res => res.json());
 }
+
 
 </script>
 
@@ -459,26 +431,6 @@ function gasRun(functionName, params = []) {
   </div>
   <script>
    
-   // ===============================
-// GAS COMPATIBILITY SHIM
-// ===============================
-if (typeof google === 'undefined') {
-  window.google = {
-    script: {
-      run: {
-        withSuccessHandler: function () {
-          return this;
-        },
-        withFailureHandler: function () {
-          return this;
-        }
-      }
-    }
-  };
-}
-
-
-    // Variabel Global
     // Variabel Global
 let items = [];          // BAHAN BAKU (lama, jangan dihapus)
 let operasional = [];    // 🆕 OPERASIONAL
@@ -707,7 +659,7 @@ function renderSuggestion(boxId, items, onSelect) {
     function verifyPin() {
       const enteredPin = document.getElementById('pinInput').value;
       
-      gasRun('verifyAdminPin', [enteredPin])
+callAPI('verifyAdminPin', [enteredPin])
   .then(function(result) {
     if (result.success) {
       hidePinPopup();
@@ -720,13 +672,41 @@ function renderSuggestion(boxId, items, onSelect) {
 
     }
 
+   // ===============================
+// PATCH 6 — EVENT LISTENER TOMBOL
+// ===============================
+
+document.getElementById('btnCatatPengeluaran')
+  ?.addEventListener('click', () => showPage('form'));
+
+document.getElementById('btnDraftPengeluaran')
+  ?.addEventListener('click', () => showPage('draft'));
+
+document.getElementById('btnAdmin')
+  ?.addEventListener('click', showPinPopup);
+
+document.getElementById('backButton')
+  ?.addEventListener('click', () => showPage('home'));
+
+document.getElementById('backFromAdmin')
+  ?.addEventListener('click', () => showPage('home'));
+
+document.getElementById('btnLoadReport')
+  ?.addEventListener('click', loadPeriodReport);
+
+document.getElementById('submitButton')
+  ?.addEventListener('click', () => submitExpense('submitted'));
+
+document.getElementById('draftButton')
+  ?.addEventListener('click', () => submitExpense('draft'));
+
     /**
      * ============================================
      * DRAFT FUNCTIONS
      * ============================================
      */
     function loadAllDrafts() {
-      gasRun('getAllTransaksi', ['draft'])
+callAPI('getAllTransaksi', ['draft'])
   .then(function(data) {
     allData = data;
     renderDraftCards();
@@ -869,21 +849,15 @@ function removeDraftFromList(draftId) {
 }
 
  function deleteDraftById(draftId) {
-
-  // 🔥 OPTIMISTIC UI: hapus draft langsung dari tampilan
   removeDraftFromList(draftId);
-runBackend('deleteTransaksi', [draftId])
-  .withSuccessHandler(function(result) {
+callAPI('deleteTransaksi', [draftId])
+  .then(function(result) {
     if (result.success) {
       showToast('Draft berhasil dihapus!', 'success');
     } else {
       loadAllDrafts();
     }
   })
-  .withFailureHandler(function() {
-    loadAllDrafts();
-  })
-  .exec();
 }
 
     function loadDraftToForm(draft) {
@@ -1113,8 +1087,8 @@ if (status === 'submitted' && !currentPhoto) {
 
 
       if (currentDraftId) {
-        runBackend('updateTransaksi', [currentDraftId, data])
-  .withSuccessHandler(function(result) {
+        callAPI('updateTransaksi', [currentDraftId, data])
+  .then(function(result) {
             submitBtnText.textContent = originalSubmitText;
             draftBtnText.textContent = originalDraftText;
             submitBtn.disabled = false;
@@ -1140,18 +1114,10 @@ if (status === 'submitted' && !currentPhoto) {
 }
 
           })
-          .withFailureHandler(function(error) {
-            submitBtnText.textContent = originalSubmitText;
-            draftBtnText.textContent = originalDraftText;
-            submitBtn.disabled = false;
-            draftBtn.disabled = false;
-            showToast('Error: ' + error, 'error');
-          })
-           .exec();
        
       } else {
-        runBackend('createTransaksi', [data])
-  .withSuccessHandler(function(result) {
+        callAPI('createTransaksi', [data])
+  .then(function(result) {
             submitBtnText.textContent = originalSubmitText;
             draftBtnText.textContent = originalDraftText;
             submitBtn.disabled = false;
@@ -1172,14 +1138,6 @@ if (status === 'submitted' && !currentPhoto) {
               showToast(result.message, 'error');
             }
           })
-          .withFailureHandler(function(error) {
-            submitBtnText.textContent = originalSubmitText;
-            draftBtnText.textContent = originalDraftText;
-            submitBtn.disabled = false;
-            draftBtn.disabled = false;
-            showToast('Error: ' + error, 'error');
-          })
-         .exec();
       }
     }
 
@@ -1255,8 +1213,8 @@ function highlight(text, keyword) {
         return;
       }
 
-       runBackend('getLaporanByPeriod', [startDate, endDate])
-  .withSuccessHandler(function (data) {
+       callAPI('getLaporanByPeriod', [startDate, endDate])
+  .then(function (data) {
   allPeriodTransactions = data;
   adminSuggestions = buildAdminSuggestions(data);
 
@@ -1484,8 +1442,6 @@ operasional.forEach(function(item) {
   svg.setAttribute('height', chartHeight);
   svg.setAttribute('viewBox', `0 0 ${width} ${chartHeight}`);
 
-  const primaryColor = '#DC2626';
-
   dailyData.forEach((data, index) => {
     const barHeight =
       maxValue === 0
@@ -1501,13 +1457,14 @@ operasional.forEach(function(item) {
     rect.setAttribute('width', barWidth);
     rect.setAttribute('height', barHeight);
     rect.setAttribute('rx', 6);
-    rect.setAttribute('fill', primaryColor);
+    rect.setAttribute('fill', '#DC2626');
 
     svg.appendChild(rect);
   });
 
   canvas.appendChild(svg);
 }
+
 
 
     /**
@@ -1854,11 +1811,13 @@ ${operasional.length === 0
       }
     }
 
-    /**
-     * ============================================
-     * EVENT LISTENERS INITIALIZATION
-     * ============================================
-     */
+function stopCamera() {
+  if (window.cameraStream) {
+    window.cameraStream.getTracks().forEach(t => t.stop());
+    window.cameraStream = null;
+  }
+}
+
     function initEventListeners() {
       document.getElementById('btnCatatPengeluaran').addEventListener('click', function() {
         resetForm();
@@ -2108,6 +2067,7 @@ document.addEventListener('click', function (e) {
  </body>
 
 </html>
+
 
 
 
