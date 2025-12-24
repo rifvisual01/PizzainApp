@@ -633,25 +633,33 @@ function renderSuggestion(boxId, items, onSelect) {
     }
 
     function verifyPin() {
-      const enteredPin = document.getElementById('pinInput').value;
-      
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            hidePinPopup();
-            showPage('admin');
-            showToast('Akses admin berhasil!', 'success');
-          } else {
-            document.getElementById('pinError').classList.remove('hidden');
-            document.getElementById('pinInput').value = '';
-            document.getElementById('pinInput').focus();
-          }
-        })
-        .withFailureHandler(function(error) {
-          showToast('Error: ' + error, 'error');
-        })
-        .verifyAdminPin(enteredPin);
-    }
+  const enteredPin = document.getElementById('pinInput').value;
+
+  const fd = new FormData();
+  fd.append('action', 'verifyAdminPin');
+  fd.append('pin', enteredPin);
+
+  fetch(API_BASE, {
+    method: 'POST',
+    body: fd
+  })
+    .then(res => res.json())
+    .then(result => {
+      if (result.success) {
+        hidePinPopup();
+        showPage('admin');
+        showToast('Akses admin berhasil!', 'success');
+      } else {
+        document.getElementById('pinError').classList.remove('hidden');
+        document.getElementById('pinInput').value = '';
+        document.getElementById('pinInput').focus();
+      }
+    })
+    .catch(error => {
+      showToast('Error: ' + error, 'error');
+    });
+}
+
 
     /**
      * ============================================
@@ -659,16 +667,24 @@ function renderSuggestion(boxId, items, onSelect) {
      * ============================================
      */
     function loadAllDrafts() {
-      google.script.run
-        .withSuccessHandler(function(data) {
-          allData = data;
-          renderDraftCards();
-        })
-        .withFailureHandler(function(error) {
-          showToast('Error loading drafts: ' + error, 'error');
-        })
-        .getAllTransaksi('draft');
-    }
+  const fd = new FormData();
+  fd.append('action', 'getAllTransaksi');
+  fd.append('status', 'draft');
+
+  fetch(API_BASE, {
+    method: 'POST',
+    body: fd
+  })
+    .then(res => res.json())
+    .then(data => {
+      allData = data;
+      renderDraftCards();
+    })
+    .catch(error => {
+      showToast('Error loading drafts: ' + error, 'error');
+    });
+}
+
 
     function renderDraftCards() {
   const drafts = Array.isArray(allData) ? allData : [];
@@ -803,26 +819,31 @@ function removeDraftFromList(draftId) {
 
  function deleteDraftById(draftId) {
 
-  // 🔥 OPTIMISTIC UI: hapus draft langsung dari tampilan
   removeDraftFromList(draftId);
 
-  google.script.run
-    .withSuccessHandler(function(result) {
+  const fd = new FormData();
+  fd.append('action', 'deleteTransaksi');
+  fd.append('id', draftId);
+
+  fetch(API_BASE, {
+    method: 'POST',
+    body: fd
+  })
+    .then(res => res.json())
+    .then(result => {
       if (result.success) {
         showToast('Draft berhasil dihapus!', 'success');
       } else {
         showToast(result.message, 'error');
-        // fallback: reload ulang kalau backend gagal
         loadAllDrafts();
       }
     })
-    .withFailureHandler(function(error) {
+    .catch(error => {
       showToast('Error: ' + error, 'error');
-      // fallback juga
       loadAllDrafts();
-    })
-    .deleteTransaksi(draftId);
+    });
 }
+
 
     function loadDraftToForm(draft) {
   currentDraftId = draft.id;
@@ -1051,72 +1072,95 @@ if (status === 'submitted' && !currentPhoto) {
 
 
       if (currentDraftId) {
-        google.script.run
-          .withSuccessHandler(function(result) {
-            submitBtnText.textContent = originalSubmitText;
-            draftBtnText.textContent = originalDraftText;
-            submitBtn.disabled = false;
-            draftBtn.disabled = false;
+        const fd = new FormData();
+fd.append('action', 'updateTransaksi');
+fd.append('id', currentDraftId);
 
-            if (result.success) {
-
-  // 🔥 OPTIMISTIC UI: HAPUS DRAFT LANGSUNG
-  if (status === 'submitted' && currentDraftId) {
-    removeDraftFromList(currentDraftId);
+Object.keys(data).forEach(k => {
+  if (data[k] !== undefined && data[k] !== null) {
+    fd.append(k, data[k]);
   }
+});
 
-  if (status === 'draft') {
-    showToast('Draft berhasil diperbarui!', 'success');
-  } else {
-    showToast('Pengeluaran berhasil disimpan!', 'success');
+fetch(API_BASE, {
+  method: 'POST',
+  body: fd
+})
+.then(res => res.json())
+.then(result => {
+  submitBtnText.textContent = originalSubmitText;
+  draftBtnText.textContent = originalDraftText;
+  submitBtn.disabled = false;
+  draftBtn.disabled = false;
+
+  if (result.success) {
+
+    if (status === 'submitted' && currentDraftId) {
+      removeDraftFromList(currentDraftId);
+    }
+
+    if (status === 'draft') {
+      showToast('Draft berhasil diperbarui!', 'success');
+    } else {
+      showToast('Pengeluaran berhasil disimpan!', 'success');
+    }
+
+    setTimeout(function() {
+      resetForm();
+      showPage('home');
+    }, 300);
   }
-
-  setTimeout(function() {
-    resetForm();
-    showPage('home');
-  }, 300); // ⬅️ cukup 300ms
-}
-
-          })
-          .withFailureHandler(function(error) {
-            submitBtnText.textContent = originalSubmitText;
-            draftBtnText.textContent = originalDraftText;
-            submitBtn.disabled = false;
-            draftBtn.disabled = false;
-            showToast('Error: ' + error, 'error');
-          })
-          .updateTransaksi(currentDraftId, data);
+})
+.catch(error => {
+  submitBtnText.textContent = originalSubmitText;
+  draftBtnText.textContent = originalDraftText;
+  submitBtn.disabled = false;
+  draftBtn.disabled = false;
+  showToast('Error: ' + error, 'error');
+});
       } else {
-        google.script.run
-          .withSuccessHandler(function(result) {
-            submitBtnText.textContent = originalSubmitText;
-            draftBtnText.textContent = originalDraftText;
-            submitBtn.disabled = false;
-            draftBtn.disabled = false;
+        const fd = new FormData();
+fd.append('action', 'createTransaksi');
 
-            if (result.success) {
-              if (status === 'draft') {
-                showToast('Draft berhasil disimpan!', 'success');
-              } else {
-                showToast('Pengeluaran berhasil disimpan!', 'success');
-              }
-              
-              setTimeout(function() {
-                resetForm();
-                showPage('home');
-              }, 1000);
-            } else {
-              showToast(result.message, 'error');
-            }
-          })
-          .withFailureHandler(function(error) {
-            submitBtnText.textContent = originalSubmitText;
-            draftBtnText.textContent = originalDraftText;
-            submitBtn.disabled = false;
-            draftBtn.disabled = false;
-            showToast('Error: ' + error, 'error');
-          })
-          .createTransaksi(data);
+Object.keys(data).forEach(k => {
+  if (data[k] !== undefined && data[k] !== null) {
+    fd.append(k, data[k]);
+  }
+});
+
+fetch(API_BASE, {
+  method: 'POST',
+  body: fd
+})
+.then(res => res.json())
+.then(result => {
+  submitBtnText.textContent = originalSubmitText;
+  draftBtnText.textContent = originalDraftText;
+  submitBtn.disabled = false;
+  draftBtn.disabled = false;
+
+  if (result.success) {
+    if (status === 'draft') {
+      showToast('Draft berhasil disimpan!', 'success');
+    } else {
+      showToast('Pengeluaran berhasil disimpan!', 'success');
+    }
+
+    setTimeout(function() {
+      resetForm();
+      showPage('home');
+    }, 1000);
+  } else {
+    showToast(result.message, 'error');
+  }
+})
+.catch(error => {
+  submitBtnText.textContent = originalSubmitText;
+  draftBtnText.textContent = originalDraftText;
+  submitBtn.disabled = false;
+  draftBtn.disabled = false;
+  showToast('Error: ' + error, 'error');
+});
       }
     }
 
@@ -1192,12 +1236,20 @@ function highlight(text, keyword) {
         return;
       }
 
-       google.script.run
-    .withSuccessHandler(function (data) {
+       const fd = new FormData();
+fd.append('action', 'getLaporanByPeriod');
+fd.append('startDate', startDate);
+fd.append('endDate', endDate);
+
+fetch(API_BASE, {
+  method: 'POST',
+  body: fd
+})
+.then(res => res.json())
+.then(data => {
   allPeriodTransactions = data;
   adminSuggestions = buildAdminSuggestions(data);
 
-  // 🔥 RESET SEARCH STATE
   currentSearchKeyword = '';
   adminInput.value = '';
   adminSuggestBox.classList.add('hidden');
@@ -1205,11 +1257,10 @@ function highlight(text, keyword) {
 
   renderReport(data);
 })
+.catch(error => {
+  showToast('Error loading report: ' + error, 'error');
+});
 
-        .withFailureHandler(function(error) {
-          showToast('Error loading report: ' + error, 'error');
-        })
-        .getLaporanByPeriod(startDate, endDate);
     }
 
 
@@ -2025,17 +2076,24 @@ async function captureFromCamera() {
 }
 
 function preloadSuggestions() {
-  google.script.run
-    .withSuccessHandler(function (data) {
+  const fd = new FormData();
+  fd.append('action', 'getSuggestions');
+
+  fetch(API_BASE, {
+    method: 'POST',
+    body: fd
+  })
+    .then(res => res.json())
+    .then(data => {
       cacheTempatBelanja = data.tempatBelanja || [];
       cacheNamaBarang = data.namaBarang || [];
       console.log('Suggestion loaded', data);
     })
-    .withFailureHandler(function () {
+    .catch(() => {
       console.warn('Gagal preload suggestion');
-    })
-    .getSuggestions(); // ← FUNCTION DI Code.gs
+    });
 }
+
 
 function selectAdminSuggestion(value) {
   adminInput.value = value;
@@ -2052,3 +2110,4 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
