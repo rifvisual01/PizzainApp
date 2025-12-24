@@ -8,30 +8,6 @@
   <script>
   const API_BASE = 'https://script.google.com/macros/s/AKfycbwptyGe3NGhzRNOXyyOESS2dzLB1waIm896pT38ngB8uajGZb-DVQ98X1ZUcVhRhh8yMQ/exec';
 </script>
-<script>
-function gasRun(functionName, params = []) {
-  return fetch(API_BASE, {
-    method: 'POST',
-    body: new URLSearchParams({
-      action: functionName,
-      payload: JSON.stringify(params)
-    })
-  })
-  .then(r => r.json());
-}
-
- function callAPI(action, payload = []) {
-  return fetch(API_BASE, {
-    method: 'POST',
-    body: new URLSearchParams({
-      action,
-      payload: JSON.stringify(payload)
-    })
-  }).then(res => res.json());
-}
-
-
-</script>
 
   <style>
     /* ============================================
@@ -93,8 +69,8 @@ function gasRun(functionName, params = []) {
         <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
         </svg>
        </div>
-       <h1 id="homeTitle" class="text-3xl font-bold text-gray-800 mb-2">Belanja Pizzain</h1>
-       <p class="text-gray-500 text-sm">Pizzain Spread Management App</p>
+       <h1 id="homeTitle" class="text-3xl font-bold text-gray-800 mb-2">Pengeluaran Toko</h1>
+       <p class="text-gray-500 text-sm">Kelola pengeluaran toko dengan mudah</p>
       </div>
      </div>
     </header>
@@ -119,7 +95,7 @@ function gasRun(functionName, params = []) {
         </svg>
        </div>
        <h3 class="text-gray-800 font-bold text-base mb-1">Draft Pengeluaran</h3>
-       <p class="text-gray-500 text-xs">Laporan tersimpan</p>
+       <p class="text-gray-500 text-xs">Lanjutkan nanti</p>
       </div></button> <button id="btnAdmin" class="group bg-white rounded-3xl p-6 shadow-lg hover:shadow-xl transition-all hover:scale-[1.02] active:scale-[0.98]">
       <div class="text-center">
        <div class="w-14 h-14 bg-gradient-to-br from-gray-700 to-gray-900 rounded-2xl mx-auto mb-3 flex items-center justify-center group-hover:scale-110 transition-transform shadow-md">
@@ -430,7 +406,7 @@ function gasRun(functionName, params = []) {
    </div>
   </div>
   <script>
-   
+    // Variabel Global
     // Variabel Global
 let items = [];          // BAHAN BAKU (lama, jangan dihapus)
 let operasional = [];    // 🆕 OPERASIONAL
@@ -454,26 +430,22 @@ const clearBtn = document.getElementById('clearAdminSearchBtn');
 
 
     let searchTimer;
-if (adminInput) {
-  adminInput.addEventListener('input', function () {
-    clearTimeout(searchTimer);
-    const value = this.value;
+adminInput.addEventListener('input', function () {
+  clearTimeout(searchTimer);
+  const value = this.value;
 
-    searchTimer = setTimeout(() => {
-      handleAdminSearch(value);
-    }, 150);
-  });
-}
+  searchTimer = setTimeout(() => {
+    handleAdminSearch(value);
+  }, 150);
+});
 
-if (clearBtn) {
-  clearBtn.addEventListener('click', function () {
-    adminInput.value = '';
-    adminSuggestBox.classList.add('hidden');
-    this.classList.add('hidden');
-    filterTransactions('');
-  });
-}
 
+clearBtn.addEventListener('click', function () {
+  adminInput.value = '';
+  adminSuggestBox.classList.add('hidden');
+  this.classList.add('hidden');
+  filterTransactions('');
+});
 
 function normalizeDriveImage(url) {
   if (!url) return '';
@@ -663,46 +635,23 @@ function renderSuggestion(boxId, items, onSelect) {
     function verifyPin() {
       const enteredPin = document.getElementById('pinInput').value;
       
-callAPI('verifyAdminPin', [enteredPin])
-  .then(function(result) {
-    if (result.success) {
-      hidePinPopup();
-      showPage('admin');
-      showToast('Akses admin berhasil!', 'success');
-    } else {
-      document.getElementById('pinError').classList.remove('hidden');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            hidePinPopup();
+            showPage('admin');
+            showToast('Akses admin berhasil!', 'success');
+          } else {
+            document.getElementById('pinError').classList.remove('hidden');
+            document.getElementById('pinInput').value = '';
+            document.getElementById('pinInput').focus();
+          }
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error: ' + error, 'error');
+        })
+        .verifyAdminPin(enteredPin);
     }
-  });
-
-    }
-
-   // ===============================
-// PATCH 6 — EVENT LISTENER TOMBOL
-// ===============================
-
-document.getElementById('btnCatatPengeluaran')
-  ?.addEventListener('click', () => showPage('form'));
-
-document.getElementById('btnDraftPengeluaran')
-  ?.addEventListener('click', () => showPage('draft'));
-
-document.getElementById('btnAdmin')
-  ?.addEventListener('click', showPinPopup);
-
-document.getElementById('backButton')
-  ?.addEventListener('click', () => showPage('home'));
-
-document.getElementById('backFromAdmin')
-  ?.addEventListener('click', () => showPage('home'));
-
-document.getElementById('btnLoadReport')
-  ?.addEventListener('click', loadPeriodReport);
-
-document.getElementById('submitButton')
-  ?.addEventListener('click', () => submitExpense('submitted'));
-
-document.getElementById('draftButton')
-  ?.addEventListener('click', () => submitExpense('draft'));
 
     /**
      * ============================================
@@ -710,15 +659,15 @@ document.getElementById('draftButton')
      * ============================================
      */
     function loadAllDrafts() {
-callAPI('getAllTransaksi', ['draft'])
-  .then(function(data) {
-    allData = data;
-    renderDraftCards();
-  })
-  .catch(function(err) {
-    showToast('Error loading drafts', 'error');
-  });
-
+      google.script.run
+        .withSuccessHandler(function(data) {
+          allData = data;
+          renderDraftCards();
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error loading drafts: ' + error, 'error');
+        })
+        .getAllTransaksi('draft');
     }
 
     function renderDraftCards() {
@@ -853,15 +802,26 @@ function removeDraftFromList(draftId) {
 }
 
  function deleteDraftById(draftId) {
+
+  // 🔥 OPTIMISTIC UI: hapus draft langsung dari tampilan
   removeDraftFromList(draftId);
-callAPI('deleteTransaksi', [draftId])
-  .then(function(result) {
-    if (result.success) {
-      showToast('Draft berhasil dihapus!', 'success');
-    } else {
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      if (result.success) {
+        showToast('Draft berhasil dihapus!', 'success');
+      } else {
+        showToast(result.message, 'error');
+        // fallback: reload ulang kalau backend gagal
+        loadAllDrafts();
+      }
+    })
+    .withFailureHandler(function(error) {
+      showToast('Error: ' + error, 'error');
+      // fallback juga
       loadAllDrafts();
-    }
-  })
+    })
+    .deleteTransaksi(draftId);
 }
 
     function loadDraftToForm(draft) {
@@ -1091,8 +1051,8 @@ if (status === 'submitted' && !currentPhoto) {
 
 
       if (currentDraftId) {
-        callAPI('updateTransaksi', [currentDraftId, data])
-  .then(function(result) {
+        google.script.run
+          .withSuccessHandler(function(result) {
             submitBtnText.textContent = originalSubmitText;
             draftBtnText.textContent = originalDraftText;
             submitBtn.disabled = false;
@@ -1118,10 +1078,17 @@ if (status === 'submitted' && !currentPhoto) {
 }
 
           })
-       
+          .withFailureHandler(function(error) {
+            submitBtnText.textContent = originalSubmitText;
+            draftBtnText.textContent = originalDraftText;
+            submitBtn.disabled = false;
+            draftBtn.disabled = false;
+            showToast('Error: ' + error, 'error');
+          })
+          .updateTransaksi(currentDraftId, data);
       } else {
-        callAPI('createTransaksi', [data])
-  .then(function(result) {
+        google.script.run
+          .withSuccessHandler(function(result) {
             submitBtnText.textContent = originalSubmitText;
             draftBtnText.textContent = originalDraftText;
             submitBtn.disabled = false;
@@ -1142,6 +1109,14 @@ if (status === 'submitted' && !currentPhoto) {
               showToast(result.message, 'error');
             }
           })
+          .withFailureHandler(function(error) {
+            submitBtnText.textContent = originalSubmitText;
+            draftBtnText.textContent = originalDraftText;
+            submitBtn.disabled = false;
+            draftBtn.disabled = false;
+            showToast('Error: ' + error, 'error');
+          })
+          .createTransaksi(data);
       }
     }
 
@@ -1217,22 +1192,24 @@ function highlight(text, keyword) {
         return;
       }
 
-       callAPI('getLaporanByPeriod', [startDate, endDate])
-  .then(function (data) {
-    allPeriodTransactions = data;
-    adminSuggestions = buildAdminSuggestions(data);
+       google.script.run
+    .withSuccessHandler(function (data) {
+  allPeriodTransactions = data;
+  adminSuggestions = buildAdminSuggestions(data);
 
-    currentSearchKeyword = '';
-    adminInput.value = '';
-    adminSuggestBox.classList.add('hidden');
-    clearBtn.classList.add('hidden');
+  // 🔥 RESET SEARCH STATE
+  currentSearchKeyword = '';
+  adminInput.value = '';
+  adminSuggestBox.classList.add('hidden');
+  clearBtn.classList.add('hidden');
 
-    renderReport(data);
-  })
-  .catch(function (error) {
-    showToast('Error loading report', 'error');
-  });
+  renderReport(data);
+})
 
+        .withFailureHandler(function(error) {
+          showToast('Error loading report: ' + error, 'error');
+        })
+        .getLaporanByPeriod(startDate, endDate);
     }
 
 
@@ -1423,51 +1400,60 @@ operasional.forEach(function(item) {
     }
 
     function drawChart(dailyData) {
-  const canvas = document.getElementById('chartCanvas');
-  canvas.innerHTML = '';
+      const canvas = document.getElementById('chartCanvas');
+      canvas.innerHTML = '';
 
-  if (!dailyData || dailyData.length === 0) return;
+      if (dailyData.length === 0) return;
 
-  const maxValue = Math.max(...dailyData.map(d => d.total));
-  const chartHeight = 240;
-  const chartPadding = 40;
-  const barGap = 10;
+      const maxValue = Math.max.apply(Math, dailyData.map(function(d) { return d.total; }));
+      const chartHeight = 240;
+      const chartPadding = 40;
+      const barWidth = Math.min(60, (canvas.offsetWidth - chartPadding * 2) / dailyData.length - 10);
 
-  const width = canvas.offsetWidth || 300;
-  const barWidth = Math.min(
-    60,
-    (width - chartPadding * 2) / dailyData.length - barGap
-  );
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('width', '100%');
+      svg.setAttribute('height', chartHeight);
+      svg.setAttribute('viewBox', '0 0 ' + canvas.offsetWidth + ' ' + chartHeight);
 
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('width', '100%');
-  svg.setAttribute('height', chartHeight);
-  svg.setAttribute('viewBox', `0 0 ${width} ${chartHeight}`);
+      const primaryColor = '#DC2626';
 
-  dailyData.forEach((data, index) => {
-    const barHeight =
-      maxValue === 0
-        ? 0
-        : (data.total / maxValue) * (chartHeight - chartPadding - 30);
+      dailyData.forEach(function(data, index) {
+        const barHeight = (data.total / maxValue) * (chartHeight - chartPadding - 30);
+        const x = chartPadding + index * (barWidth + 10);
+        const y = chartHeight - chartPadding - barHeight;
 
-    const x = chartPadding + index * (barWidth + barGap);
-    const y = chartHeight - chartPadding - barHeight;
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', x);
+        rect.setAttribute('y', y);
+        rect.setAttribute('width', barWidth);
+        rect.setAttribute('height', barHeight);
+        rect.setAttribute('fill', primaryColor);
+        rect.setAttribute('rx', '6');
+        rect.classList.add('hover:opacity-80', 'transition-opacity', 'cursor-pointer');
+        svg.appendChild(rect);
 
-    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    rect.setAttribute('x', x);
-    rect.setAttribute('y', y);
-    rect.setAttribute('width', barWidth);
-    rect.setAttribute('height', barHeight);
-    rect.setAttribute('rx', 6);
-    rect.setAttribute('fill', '#DC2626');
+        const valueText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        valueText.setAttribute('x', x + barWidth / 2);
+        valueText.setAttribute('y', y - 5);
+        valueText.setAttribute('text-anchor', 'middle');
+        valueText.setAttribute('fill', '#374151');
+        valueText.setAttribute('font-size', '11');
+        valueText.setAttribute('font-weight', 'bold');
+        valueText.textContent = (data.total / 1000).toFixed(0) + 'k';
+        svg.appendChild(valueText);
 
-    svg.appendChild(rect);
-  });
+        const dateText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        dateText.setAttribute('x', x + barWidth / 2);
+        dateText.setAttribute('y', chartHeight - chartPadding + 15);
+        dateText.setAttribute('text-anchor', 'middle');
+        dateText.setAttribute('fill', '#6B7280');
+        dateText.setAttribute('font-size', '10');
+        dateText.textContent = data.label;
+        svg.appendChild(dateText);
+      });
 
-  canvas.appendChild(svg);
-}
-
-
+      canvas.appendChild(svg);
+    }
 
     /**
      * ⭐ PERUBAHAN UTAMA: Render daily cards dengan design red card
@@ -1813,6 +1799,11 @@ ${operasional.length === 0
       }
     }
 
+    /**
+     * ============================================
+     * EVENT LISTENERS INITIALIZATION
+     * ============================================
+     */
     function initEventListeners() {
       document.getElementById('btnCatatPengeluaran').addEventListener('click', function() {
         resetForm();
@@ -1980,10 +1971,10 @@ async function openCamera() {
 
 // Tutup kamera (aman dipanggil berulang)
 function stopCamera() {
-  if (typeof cameraStream === 'undefined' || !cameraStream) return;
-  cameraStream.getTracks().forEach(t => t.stop());
-  cameraStream = null;
-}
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
   const wrap = document.getElementById('cameraWrap');
   if (wrap) wrap.classList.add('hidden');
 }
@@ -2002,7 +1993,7 @@ async function captureFromCamera() {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0);
 
-  const base64Data = canvas.toDataURL('image/jpeg', 0.75);
+  const base64Data = canvas.toDataURL('image/jpeg', 0.85);
 
   stopCamera(); // 🔒 matikan kamera
 
@@ -2057,21 +2048,7 @@ document.addEventListener('click', function (e) {
   }
 });
 
-   function stopCamera() {
-  if (window.cameraStream) {
-    window.cameraStream.getTracks().forEach(t => t.stop());
-    window.cameraStream = null;
-  }
-}
-
 
   </script>
  </body>
-
 </html>
-
-
-
-
-
-
