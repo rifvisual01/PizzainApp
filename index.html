@@ -2067,12 +2067,36 @@ async function captureFromCamera() {
     return;
   }
 
+  // 🔹 ukuran video yang TAMPIL di UI
+  const displayWidth = video.clientWidth;
+  const displayHeight = video.clientHeight;
+
+  // 🔹 resolusi asli stream kamera
+  const videoWidth = video.videoWidth;
+  const videoHeight = video.videoHeight;
+
+  // 🔹 hitung skala
+  const scaleX = videoWidth / displayWidth;
+  const scaleY = videoHeight / displayHeight;
+
   const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+  canvas.width = displayWidth;
+  canvas.height = displayHeight;
 
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0);
+
+  // 🔥 gambar ulang sesuai tampilan video (IDENTIK)
+  ctx.drawImage(
+    video,
+    0,
+    0,
+    displayWidth * scaleX,
+    displayHeight * scaleY,
+    0,
+    0,
+    displayWidth,
+    displayHeight
+  );
 
   const base64Data = canvas.toDataURL('image/jpeg', 0.85);
 
@@ -2140,6 +2164,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
