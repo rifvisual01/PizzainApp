@@ -1259,12 +1259,12 @@ fetch(API_BASE, {
 })
 .catch(error => {
   showToast('Error loading report: ' + error, 'error');
-});
-       .finally(() => {
+})
+.finally(() => {
     setLoadReportLoading(false); // ⬅️ TAMBAH
   });
-
     }
+   
 function setLoadReportLoading(isLoading) {
   const btn = document.getElementById('btnLoadReport');
   if (!btn) return;
@@ -2136,6 +2136,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
