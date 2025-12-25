@@ -1017,12 +1017,12 @@ function renderList(arr, listId, containerId) {
         return;
       }
 
-      if (status === 'submit' && items.length === 0 && operasional.length === 0) {
+      if (status === 'submitted' && items.length === 0 && operasional.length === 0) {
   showToast('Tambahkan minimal 1 barang atau operasional', 'warning');
   return;
 }
 
-if (status === 'submit' && !currentPhoto) {
+if (status === 'submitted' && !currentPhoto) {
   showToast('Mohon upload foto bukti terlebih dahulu', 'warning');
   return;
 }
@@ -1038,7 +1038,7 @@ if (status === 'submit' && !currentPhoto) {
       submitBtn.disabled = true;
       draftBtn.disabled = true;
       
-      if (status === 'submit') {
+      if (status === 'submitted') {
         submitBtnText.innerHTML = `
           <div class="flex items-center justify-center gap-2">
             <svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
@@ -1094,7 +1094,7 @@ fetch(API_BASE, {
 
   if (result.success) {
 
-    if (status === 'submit' && currentDraftId) {
+    if (status === 'submitted' && currentDraftId) {
       removeDraftFromList(currentDraftId);
     }
 
@@ -1884,7 +1884,7 @@ document.getElementById('addOperasionalButton')
   .addEventListener('click', () => addItemToList('operasional'));
 
       document.getElementById('submitButton').addEventListener('click', function() {
-        submitExpense('submit');
+        submitExpense('submitted');
       });
       document.getElementById('draftButton').addEventListener('click', function() {
         submitExpense('draft');
@@ -2109,6 +2109,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
