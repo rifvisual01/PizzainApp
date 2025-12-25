@@ -256,7 +256,7 @@
     </svg>
     <span class="text-sm">Mengupload...</span>
   </div>
-      <div id="photoPreview" class="hidden mt-3"><img id="previewImage" class="w-full aspect-square object-cover rounded-lg border-2 border-gray-200" alt="Preview foto">
+      <div id="photoPreview" class="hidden mt-3"><img id="previewImage" class="w-full h-80 object-cover rounded-xl border-2 border-gray-200" alt="Preview foto">
       </div>
      </div>
      <div class="grid grid-cols-2 gap-3"><button id="submitButton" class="py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"> <span id="submitButtonText">SUBMIT</span> </button> <button id="draftButton" class="py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors disabled:bg-gray-100 disabled:cursor-not-allowed"> <span id="draftButtonText">SIMPAN DRAFT</span> </button>
@@ -1234,6 +1234,7 @@ function highlight(text, keyword) {
         showToast('Tanggal awal harus sebelum tanggal akhir', 'error');
         return;
       }
+     setLoadReportLoading(true);
 
        const fd = new FormData();
 fd.append('action', 'getLaporanByPeriod');
@@ -1256,11 +1257,13 @@ fetch(API_BASE, {
 
   renderReport(data);
 })
-.catch(error => {
-  showToast('Error loading report: ' + error, 'error');
-});
-
-    }
+ .catch(error => {
+    showToast('Error loading report: ' + error, 'error');
+  })
+  .finally(() => {
+    setLoadReportLoading(false); // ⬅️ TAMBAH
+  });
+}
 
 
 if (adminInput) adminInput.value = '';
@@ -1291,6 +1294,29 @@ function buildAdminSuggestions(transactions) {
     tempat: Array.from(tempatSet),
     barang: Array.from(barangSet)
   };
+}
+function setLoadReportLoading(isLoading) {
+  const btn = document.getElementById('btnLoadReport');
+  if (!btn) return;
+
+  const text = btn.querySelector('span');
+  const icon = btn.querySelector('svg');
+
+  if (isLoading) {
+    btn.disabled = true;
+    btn.classList.add('opacity-70', 'cursor-not-allowed');
+
+    btn.dataset.originalText = text.textContent;
+    text.textContent = 'Memuat...';
+
+    icon.classList.add('animate-spin');
+  } else {
+    btn.disabled = false;
+    btn.classList.remove('opacity-70', 'cursor-not-allowed');
+
+    text.textContent = btn.dataset.originalText || 'Tampilkan Laporan';
+    icon.classList.remove('animate-spin');
+  }
 }
 
 
@@ -2109,6 +2135,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
