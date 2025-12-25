@@ -237,7 +237,7 @@
     <video id="cameraVideo"
        autoplay
        playsinline
-       class="w-full aspect-square object-cover rounded-xl bg-black">
+       class="w-full h-96 object-cover rounded-xl">
 </video>
     <button
       id="captureBtn"
@@ -256,7 +256,7 @@
     </svg>
     <span class="text-sm">Mengupload...</span>
   </div>
-      <div id="photoPreview" class="hidden mt-3"><img id="previewImage" class="w-full h-80 object-cover rounded-xl border-2 border-gray-200" alt="Preview foto">
+      <div id="photoPreview" class="hidden mt-3"><img id="previewImage" class="w-full h-96 object-cover rounded-xl border-2 border-gray-200" alt="Preview foto">
       </div>
      </div>
      <div class="grid grid-cols-2 gap-3"><button id="submitButton" class="py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"> <span id="submitButtonText">SUBMIT</span> </button> <button id="draftButton" class="py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors disabled:bg-gray-100 disabled:cursor-not-allowed"> <span id="draftButtonText">SIMPAN DRAFT</span> </button>
@@ -1853,7 +1853,7 @@ ${operasional.length === 0
   <div class="mt-3">
   <p class="text-sm font-semibold text-gray-700 mb-2">Foto Bukti:</p>
 
-  <div class="w-full aspect-square bg-black overflow-hidden rounded-xl border-2 border-gray-200">
+  <div class="w-full h-80 bg-black overflow-hidden rounded-xl border-2 border-gray-200">
     <img src="${normalizeDriveImage(transaction.foto_url)}"
          referrerpolicy="no-referrer"
          class="w-full h-full object-cover"
@@ -2135,6 +2135,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
