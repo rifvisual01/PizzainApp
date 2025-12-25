@@ -1259,10 +1259,10 @@ fetch(API_BASE, {
 })
 .catch(error => {
   showToast('Error loading report: ' + error, 'error');
-
- .finally(() => {
-    setLoadReportLoading(false);
 });
+       .finally(() => {
+    setLoadReportLoading(false); // ⬅️ TAMBAH
+  });
 
     }
 function setLoadReportLoading(isLoading) {
@@ -2136,6 +2136,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
