@@ -1264,31 +1264,6 @@ fetch(API_BASE, {
     setLoadReportLoading(false); // ⬅️ TAMBAH
   });
     }
-   
-function setLoadReportLoading(isLoading) {
-  const btn = document.getElementById('btnLoadReport');
-  if (!btn) return;
-
-  const text = btn.querySelector('span');
-  const icon = btn.querySelector('svg');
-
-  if (isLoading) {
-    btn.disabled = true;
-    btn.classList.add('opacity-70', 'cursor-not-allowed');
-
-    btn.dataset.originalText = text.textContent;
-    text.textContent = 'Memuat...';
-
-    icon.classList.add('animate-spin');
-  } else {
-    btn.disabled = false;
-    btn.classList.remove('opacity-70', 'cursor-not-allowed');
-
-    text.textContent = btn.dataset.originalText || 'Tampilkan Laporan';
-    icon.classList.remove('animate-spin');
-  }
-}
-
 
 if (adminInput) adminInput.value = '';
 if (adminSuggestBox) adminSuggestBox.classList.add('hidden');
@@ -1320,7 +1295,30 @@ function buildAdminSuggestions(transactions) {
   };
 }
 
+function setLoadReportLoading(isLoading) {
+  const btn = document.getElementById('btnLoadReport');
+  if (!btn) return;
 
+  const text = btn.querySelector('span');
+  const icon = btn.querySelector('svg');
+
+  if (isLoading) {
+    btn.disabled = true;
+    btn.classList.add('opacity-70', 'cursor-not-allowed');
+
+    btn.dataset.originalText = text.textContent;
+    text.textContent = 'Memuat...';
+
+    icon.classList.add('animate-spin');
+  } else {
+    btn.disabled = false;
+    btn.classList.remove('opacity-70', 'cursor-not-allowed');
+
+    text.textContent = btn.dataset.originalText || 'Tampilkan Laporan';
+    icon.classList.remove('animate-spin');
+  }
+}
+   
 function handleAdminSearch(raw) {
   const keyword = raw.trim().toLowerCase();
 
@@ -2136,6 +2134,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
