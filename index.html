@@ -2067,59 +2067,16 @@ async function captureFromCamera() {
     return;
   }
 
-  // Ukuran container yang terlihat (portrait)
-  const containerWidth = video.clientWidth;
-  const containerHeight = video.clientHeight;
-  const containerRatio = containerWidth / containerHeight;
-
-  // Resolusi asli video
-  const videoWidth = video.videoWidth;
-  const videoHeight = video.videoHeight;
-  const videoRatio = videoWidth / videoHeight;
-
-  let sx, sy, sw, sh;
-
-  // 🔥 LOGIKA OBJECT-COVER (CROP TENGAH)
-  if (videoRatio > containerRatio) {
-    // Video terlalu lebar → crop kiri-kanan
-    sh = videoHeight;
-    sw = sh * containerRatio;
-    sx = (videoWidth - sw) / 2;
-    sy = 0;
-  } else {
-    // Video terlalu tinggi → crop atas-bawah
-    sw = videoWidth;
-    sh = sw / containerRatio;
-    sx = 0;
-    sy = (videoHeight - sh) / 2;
-  }
-
-  // Canvas = ukuran yang tampil di UI
   const canvas = document.createElement('canvas');
-  canvas.width = containerWidth;
-  canvas.height = containerHeight;
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
 
   const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
 
-  // 🎯 Gambar hasil crop TANPA DISTORSI
-  ctx.drawImage(
-    video,
-    sx, sy, sw, sh,        // sumber (crop tengah)
-    0, 0, containerWidth, containerHeight // tujuan
-  );
+  const base64Data = canvas.toDataURL('image/jpeg', 0.85);
 
-  const base64Data = canvas.toDataURL('image/jpeg', 0.75);
-
- // 🔹 TAMPILKAN PREVIEW (WAJIB)
-const previewWrap = document.getElementById('photoPreview');
-const previewImg = document.getElementById('previewImage');
-
-if (previewImg && previewWrap) {
-  previewImg.src = base64Data;
-  previewWrap.classList.remove('hidden');
-}
-
-  stopCamera();
+  stopCamera(); // 🔒 matikan kamera
 
   document.getElementById('uploadSpinner').classList.remove('hidden');
 
@@ -2132,7 +2089,14 @@ if (previewImg && previewWrap) {
     const res = await fetch(API_BASE, { method: 'POST', body: fd });
     const result = await res.json();
 
-    // lanjutkan logic kamu (set preview, simpan fileId, dll)
+    if (result.success) {
+      currentPhoto = result.url;
+      currentPhotoFileId = result.fileId;
+      renderPhotoPreview(normalizeDriveImage(result.url));
+      showToast('Foto berhasil diambil', 'success');
+    } else {
+      showToast(result.message || 'Upload gagal', 'error');
+    }
   } catch (err) {
     console.error(err);
     showToast('Gagal upload foto', 'error');
@@ -2176,6 +2140,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
