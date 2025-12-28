@@ -2082,7 +2082,24 @@ canvas.height = height;
 const ctx = canvas.getContext('2d');
 
 // 🔥 gambar PERSIS seperti yang terlihat (TANPA CROP TAMBAHAN)
-ctx.drawImage(video, 0, 0, width, height);
+const videoW = video.videoWidth;
+const videoH = video.videoHeight;
+
+const scale = Math.max(width / videoW, height / videoH);
+
+const drawW = videoW * scale;
+const drawH = videoH * scale;
+
+const offsetX = (width - drawW) / 2;
+const offsetY = (height - drawH) / 2;
+
+ctx.drawImage(
+  video,
+  offsetX,
+  offsetY,
+  drawW,
+  drawH
+);
 
 
   const base64Data = canvas.toDataURL('image/jpeg', 0.85);
@@ -2151,6 +2168,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
