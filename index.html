@@ -479,8 +479,7 @@ function renderPhotoPreview(url) {
   img.src = normalizeDriveImage(url);
   img.referrerPolicy = 'no-referrer';
   img.alt = 'Preview foto';
-  img.className = 'w-full aspect-square object-cover rounded-xl border-2 border-gray-200';
-
+  img.className = 'w-full object-cover rounded-xl border-2 border-gray-200';
   img.onerror = () => {
     box.innerHTML = '<div style="color:#999">Gagal memuat foto</div>';
   };
@@ -2152,6 +2151,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
