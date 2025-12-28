@@ -234,18 +234,22 @@
 
   <!-- Area kamera -->
   <div id="cameraWrap" class="hidden mt-3">
-    <video id="cameraVideo"
-       autoplay
-       playsinline
-       class="w-full aspect-[3/4] object-cover rounded-xl">
-</video>
-    <button
-      id="captureBtn"
-      class="w-full mt-2 py-2 bg-red-600 text-white rounded-lg"
-    >
-      Ambil Foto
-    </button>
+  <div class="w-full aspect-[9/16] overflow-hidden rounded-xl">
+    <video
+      id="cameraVideo"
+      autoplay
+      playsinline
+      class="w-full h-full object-cover">
+    </video>
   </div>
+
+  <button
+    id="captureBtn"
+    class="w-full mt-2 py-2 bg-red-600 text-white rounded-lg">
+    Ambil Foto
+  </button>
+</div>
+
 
   <!-- Spinner (TETAP DIPAKAI) -->
   <div id="uploadSpinner" class="hidden mt-3 flex items-center justify-center gap-2 text-red-600">
@@ -2068,11 +2072,19 @@ async function captureFromCamera() {
   }
 
   const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
 
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0);
+// 🔥 ukuran SESUAI BOX VIDEO YANG TERLIHAT
+const width = video.clientWidth;
+const height = video.clientHeight;
+
+canvas.width = width;
+canvas.height = height;
+
+const ctx = canvas.getContext('2d');
+
+// 🔥 gambar PERSIS seperti yang terlihat (TANPA CROP TAMBAHAN)
+ctx.drawImage(video, 0, 0, width, height);
+
 
   const base64Data = canvas.toDataURL('image/jpeg', 0.85);
 
@@ -2140,6 +2152,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
