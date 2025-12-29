@@ -585,6 +585,21 @@ function renderSuggestion(boxId, items, onSelect) {
       }, 3000);
     }
 
+   // ============================================
+// SPA ROUTER (HISTORY SUPPORT)
+// ============================================
+function navigate(page, push = true) {
+  showPage(page);
+
+  if (push) {
+    history.pushState(
+      { page },
+      '',
+      '#' + page
+    );
+  }
+}
+
     /**
      * ============================================
      * NAVIGASI
@@ -621,6 +636,10 @@ function renderSuggestion(boxId, items, onSelect) {
   window.scrollTo(0, 0);
 }
 
+window.addEventListener('popstate', function (event) {
+  const page = event.state?.page || 'home';
+  navigate(page, false); // ⛔ JANGAN pushState lagi
+});
 
     /**
      * ============================================
@@ -655,7 +674,7 @@ function renderSuggestion(boxId, items, onSelect) {
     .then(result => {
       if (result.success) {
         hidePinPopup();
-        showPage('admin');
+        navigate('admin');
         showToast('Akses admin berhasil!', 'success');
       } else {
         document.getElementById('pinError').classList.remove('hidden');
@@ -1114,7 +1133,7 @@ fetch(API_BASE, {
 
     setTimeout(function() {
       resetForm();
-      showPage('home');
+      history.back();
     }, 300);
   }
 })
@@ -1155,7 +1174,7 @@ fetch(API_BASE, {
 
     setTimeout(function() {
       resetForm();
-      showPage('home');
+      history.back();
     }, 1000);
   } else {
     showToast(result.message, 'error');
@@ -1891,11 +1910,11 @@ ${operasional.length === 0
     function initEventListeners() {
       document.getElementById('btnCatatPengeluaran').addEventListener('click', function() {
         resetForm();
-        showPage('form');
+        navigate('form');
       });
 
       document.getElementById('btnDraftPengeluaran').addEventListener('click', function() {
-        showPage('draft');
+        navigate('draft');
       });
 
       document.getElementById('btnAdmin').addEventListener('click', function() {
@@ -1926,16 +1945,16 @@ document.getElementById('addOperasionalButton')
       
       document.getElementById('backButton').addEventListener('click', function() {
         resetForm();
-        showPage('home');
+        history.back();
       });
 
       document.getElementById('backToDraftButton').addEventListener('click', function() {
         resetForm();
-        showPage('home');
+        history.back();
       });
 
       document.getElementById('backFromAdmin').addEventListener('click', function() {
-        showPage('home');
+        history.back();
       });
 
       document.getElementById('btnLoadReport').addEventListener('click', function() {
@@ -2028,9 +2047,15 @@ function selectBarang(val) {
      */
     (function init() {
   initEventListeners();
-  preloadSuggestions(); // ⭐ preload sekali
-  showPage('home');
+  preloadSuggestions();
+
+  const hash = location.hash.replace('#', '');
+  const page = hash || 'home';
+
+  history.replaceState({ page }, '', '#' + page);
+  showPage(page);
 })();
+
 
     let cameraStream = null;
 
@@ -2168,6 +2193,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
