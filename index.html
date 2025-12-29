@@ -2049,6 +2049,9 @@ function selectBarang(val) {
   initEventListeners();
   preloadSuggestions();
 
+  // 🔥 PRELOAD DRAFT DI BACKGROUND
+  loadAllDrafts();
+
   const hash = location.hash.replace('#', '');
   const page = hash || 'home';
 
@@ -2193,6 +2196,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
