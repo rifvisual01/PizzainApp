@@ -1475,41 +1475,53 @@ operasional.forEach(item => {
 }
 
       const chartContainer = document.getElementById('chartContainer');
-      if (isMultiDay) {
-        const dailyTotals = {};
-        
-        periodTransactions.forEach(function(t) {
-          const dateKey = new Date(t.created_at).toISOString().split('T')[0];
-          if (!dailyTotals[dateKey]) {
-            dailyTotals[dateKey] = 0;
-          }
-          const bahan = t.items ? JSON.parse(t.items) : [];
-const operasional = t.operasional ? JSON.parse(t.operasional) : [];
 
-bahan.forEach(function(item) {
-  dailyTotals[dateKey] += item[3];
-});
+if (isMultiDay) {
+  const dailyTotals = {}; // ✅ WAJIB ADA
 
-operasional.forEach(function(item) {
-  dailyTotals[dateKey] += item[3];
-});
+  periodTransactions.forEach(function (t) {
+    const dateKey = new Date(t.created_at).toISOString().split('T')[0];
 
-        });
+    if (!dailyTotals[dateKey]) {
+      dailyTotals[dateKey] = 0;
+    }
 
-        const dailyData = Object.keys(dailyTotals).sort().map(function(dateKey) {
-          const dateObj = new Date(dateKey);
-          return {
-            date: dateKey,
-            label: dateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
-            total: dailyTotals[dateKey]
-          };
-        });
+    const bahan = t.items ? JSON.parse(t.items) : [];
+    const operasional = t.operasional ? JSON.parse(t.operasional) : [];
 
-        chartContainer.classList.remove('hidden');
-        drawChart(dailyData);
-      } else {
-        chartContainer.classList.add('hidden');
+    const kw = currentSearchKeyword;
+
+    bahan.forEach(item => {
+      if (!kw || item[0].toLowerCase().includes(kw)) {
+        dailyTotals[dateKey] += item[3];
       }
+    });
+
+    operasional.forEach(item => {
+      if (!kw || item[0].toLowerCase().includes(kw)) {
+        dailyTotals[dateKey] += item[3];
+      }
+    });
+  });
+
+  const dailyData = Object.keys(dailyTotals)
+    .sort()
+    .map(dateKey => ({
+      date: dateKey,
+      label: new Date(dateKey).toLocaleDateString('id-ID', {
+        day: 'numeric',
+        month: 'short'
+      }),
+      total: dailyTotals[dateKey]
+    }));
+
+  chartContainer.classList.remove('hidden');
+  drawChart(dailyData);
+
+} else {
+  chartContainer.classList.add('hidden');
+}
+
 
       renderTransactions(periodTransactions);
     }
@@ -2244,6 +2256,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
