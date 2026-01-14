@@ -1605,6 +1605,14 @@ if (isMultiDay) {
         const groupedByDate = {};
         
         transactions.forEach(function(transaction) {
+         const bahan = transaction.items
+  ? JSON.parse(transaction.items)
+  : [];
+
+const operasional = transaction.operasional
+  ? JSON.parse(transaction.operasional)
+  : [];
+
           const kw = currentSearchKeyword;
 
 const filteredBahan = bahan.filter(item =>
@@ -2253,6 +2261,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
