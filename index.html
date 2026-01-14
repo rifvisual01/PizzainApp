@@ -1439,8 +1439,20 @@ function filterTransactions(keyword) {
         const bahan = t.items ? JSON.parse(t.items) : [];
 const operasional = t.operasional ? JSON.parse(t.operasional) : [];
 
-bahan.forEach(item => totalAmount += item[3]);
-operasional.forEach(item => totalAmount += item[3]);
+const kw = currentSearchKeyword;
+
+bahan.forEach(item => {
+  if (!kw || item[0].toLowerCase().includes(kw)) {
+    totalAmount += item[3];
+  }
+});
+
+operasional.forEach(item => {
+  if (!kw || item[0].toLowerCase().includes(kw)) {
+    totalAmount += item[3];
+  }
+});
+
 
         });
 
@@ -1584,13 +1596,24 @@ operasional.forEach(function(item) {
         const groupedByDate = {};
         
         transactions.forEach(function(transaction) {
-          const bahan = transaction.items
-  ? JSON.parse(transaction.items)
-  : [];
+          const kw = currentSearchKeyword;
 
-const operasional = transaction.operasional
-  ? JSON.parse(transaction.operasional)
-  : [];
+const filteredBahan = bahan.filter(item =>
+  !kw || item[0].toLowerCase().includes(kw)
+);
+
+const filteredOperasional = operasional.filter(item =>
+  !kw || item[0].toLowerCase().includes(kw)
+);
+
+         if (
+  currentSearchKeyword &&
+  filteredBahan.length === 0 &&
+  filteredOperasional.length === 0
+) {
+  return; // ⛔ SKIP transaksi ini
+}
+
 
           const dateKey = new Date(transaction.created_at).toISOString().split('T')[0];
           if (!groupedByDate[dateKey]) {
@@ -1707,14 +1730,19 @@ const operasional = transaction.operasional
             const timeObj = new Date(transaction.created_at);
             const waktu = timeObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
             
-            let transactionTotal = 0;
+          let transactionTotal = 0;
+const kw = currentSearchKeyword;
 
 bahan.forEach(item => {
-  transactionTotal += item[3];
+  if (!kw || item[0].toLowerCase().includes(kw)) {
+    transactionTotal += item[3];
+  }
 });
 
 operasional.forEach(item => {
-  transactionTotal += item[3];
+  if (!kw || item[0].toLowerCase().includes(kw)) {
+    transactionTotal += item[3];
+  }
 });
 
 
@@ -1807,12 +1835,31 @@ const operasional = transaction.operasional
   : [];
 
           const dateObj = new Date(transaction.created_at);
-          const tanggal = dateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
-          const waktu = dateObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-          
-          let transactionTotal = 0;
-bahan.forEach(item => transactionTotal += item[3]);
-operasional.forEach(item => transactionTotal += item[3]);
+const tanggal = dateObj.toLocaleDateString('id-ID', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric'
+});
+const waktu = dateObj.toLocaleTimeString('id-ID', {
+  hour: '2-digit',
+  minute: '2-digit'
+});
+
+let transactionTotal = 0;
+const kw = currentSearchKeyword;
+
+bahan.forEach(item => {
+  if (!kw || item[0].toLowerCase().includes(kw)) {
+    transactionTotal += item[3];
+  }
+});
+
+operasional.forEach(item => {
+  if (!kw || item[0].toLowerCase().includes(kw)) {
+    transactionTotal += item[3];
+  }
+});
+
 
 
           const card = document.createElement('div');
@@ -2196,6 +2243,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
