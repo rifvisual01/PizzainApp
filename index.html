@@ -1443,13 +1443,13 @@ const kw = currentSearchKeyword;
 
 bahan.forEach(item => {
   if (!kw || item[0].toLowerCase().includes(kw)) {
-    totalAmount += item[3];
+    dailyTotals[dateKey] += item[3];
   }
 });
 
 operasional.forEach(item => {
   if (!kw || item[0].toLowerCase().includes(kw)) {
-    totalAmount += item[3];
+    dailyTotals[dateKey] += item[3];
   }
 });
 
@@ -1606,13 +1606,14 @@ const filteredOperasional = operasional.filter(item =>
   !kw || item[0].toLowerCase().includes(kw)
 );
 
-         if (
+if (
   currentSearchKeyword &&
   filteredBahan.length === 0 &&
   filteredOperasional.length === 0
 ) {
-  return; // ⛔ SKIP transaksi ini
+  return;
 }
+
 
 
           const dateKey = new Date(transaction.created_at).toISOString().split('T')[0];
@@ -2243,6 +2244,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
