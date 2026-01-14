@@ -1435,26 +1435,23 @@ function filterTransactions(keyword) {
     function renderReport(periodTransactions) {
       let totalAmount = 0;
 
-      periodTransactions.forEach(function(t) {
-        const bahan = t.items ? JSON.parse(t.items) : [];
-const operasional = t.operasional ? JSON.parse(t.operasional) : [];
+periodTransactions.forEach(function(t) {
+  const bahan = t.items ? JSON.parse(t.items) : [];
+  const operasional = t.operasional ? JSON.parse(t.operasional) : [];
+  const kw = currentSearchKeyword;
 
-const kw = currentSearchKeyword;
+  bahan.forEach(item => {
+    if (!kw || item[0].toLowerCase().includes(kw)) {
+      totalAmount += item[3];
+    }
+  });
 
-bahan.forEach(item => {
-  if (!kw || item[0].toLowerCase().includes(kw)) {
-    dailyTotals[dateKey] += item[3];
-  }
+  operasional.forEach(item => {
+    if (!kw || item[0].toLowerCase().includes(kw)) {
+      totalAmount += item[3];
+    }
+  });
 });
-
-operasional.forEach(item => {
-  if (!kw || item[0].toLowerCase().includes(kw)) {
-    dailyTotals[dateKey] += item[3];
-  }
-});
-
-
-        });
 
       const startObj = new Date(startDate);
       const endObj = new Date(endDate);
@@ -2256,6 +2253,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
