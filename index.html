@@ -1249,8 +1249,8 @@ function highlight(text, keyword) {
 
     return v
       .toLowerCase()
-      .split(/\s+/)        // pisah kata
-      .some(word => word.startsWith(kw)); // ⬅️ PREFIX MATCH
+      .split(/\s+/)
+      .some(word => word.startsWith(kw));
   });
 }
 
@@ -1505,20 +1505,18 @@ periodTransactions.forEach(t => {
   const kw = currentSearchKeyword;
 
   const tempatMatch =
-  typeof t.tempat_belanja === 'string' &&
-  t.tempat_belanja.toLowerCase().includes(kw);
+    kw &&
+    typeof t.tempat_belanja === 'string' &&
+    t.tempat_belanja.toLowerCase().includes(kw);
 
-// 🔥 JIKA MATCH TEMPAT → JANGAN FILTER ITEM
-if (kw && tempatMatch) {
-  bahan.forEach(i => totalAmount += i[3]);
-  operasional.forEach(i => totalAmount += i[3]);
+  // 🔥 MODE TEMPAT → HITUNG SEMUA ITEM
+  if (tempatMatch) {
+    bahan.forEach(i => totalAmount += i[3]);
+    operasional.forEach(i => totalAmount += i[3]);
+    return;
+  }
 
-  // ⛔️ PENTING: render transaksi TANPA filter item
-  renderFullTransactionCard(t); // ⬅️ pastikan ini dipanggil
-  return;
-}
-
-  // 🔹 MODE BARANG
+  // 🔹 MODE BARANG → FILTER ITEM
   bahan.forEach(i => {
     if (!kw || i[0].toLowerCase().includes(kw)) {
       totalAmount += i[3];
@@ -1531,6 +1529,7 @@ if (kw && tempatMatch) {
     }
   });
 });
+
 
 
       const startObj = new Date(startDate);
@@ -2341,6 +2340,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
