@@ -1497,39 +1497,55 @@ function filterTransactions(keyword) {
   
 
     function renderReport(periodTransactions) {
-      let totalAmount = 0;
+     const dailyTotals = {};
+let totalAmount = 0;
 
 periodTransactions.forEach(t => {
   const bahan = t.items ? JSON.parse(t.items) : [];
   const operasional = t.operasional ? JSON.parse(t.operasional) : [];
   const kw = currentSearchKeyword;
 
+  const tanggal = new Date(t.created_at)
+    .toISOString()
+    .slice(0, 10);
+
+  if (!dailyTotals[tanggal]) {
+    dailyTotals[tanggal] = 0;
+  }
+
   const tempatMatch =
     kw &&
     typeof t.tempat_belanja === 'string' &&
     t.tempat_belanja.toLowerCase().includes(kw);
 
-  // 🔥 MODE TEMPAT → HITUNG SEMUA ITEM
+  // 🔥 MODE TEMPAT
   if (tempatMatch) {
-    bahan.forEach(i => totalAmount += i[3]);
-    operasional.forEach(i => totalAmount += i[3]);
+    bahan.forEach(i => {
+      dailyTotals[tanggal] += i[3];
+      totalAmount += i[3];
+    });
+    operasional.forEach(i => {
+      dailyTotals[tanggal] += i[3];
+      totalAmount += i[3];
+    });
     return;
   }
 
-  // 🔹 MODE BARANG → FILTER ITEM
+  // 🔹 MODE BARANG
   bahan.forEach(i => {
     if (!kw || i[0].toLowerCase().includes(kw)) {
+      dailyTotals[tanggal] += i[3];
       totalAmount += i[3];
     }
   });
 
   operasional.forEach(i => {
     if (!kw || i[0].toLowerCase().includes(kw)) {
+      dailyTotals[tanggal] += i[3];
       totalAmount += i[3];
     }
   });
 });
-
 
 
       const startObj = new Date(startDate);
@@ -1553,33 +1569,6 @@ periodTransactions.forEach(t => {
       const chartContainer = document.getElementById('chartContainer');
 
 if (isMultiDay) {
-  const dailyTotals = {}; // ✅ WAJIB ADA
-
-  periodTransactions.forEach(function (t) {
-    const dateKey = new Date(t.created_at).toISOString().split('T')[0];
-
-    if (!dailyTotals[dateKey]) {
-      dailyTotals[dateKey] = 0;
-    }
-
-    const bahan = t.items ? JSON.parse(t.items) : [];
-    const operasional = t.operasional ? JSON.parse(t.operasional) : [];
-
-    const kw = currentSearchKeyword;
-
-    bahan.forEach(item => {
-      if (!kw || item[0].toLowerCase().includes(kw)) {
-        dailyTotals[dateKey] += item[3];
-      }
-    });
-
-    operasional.forEach(item => {
-      if (!kw || item[0].toLowerCase().includes(kw)) {
-        dailyTotals[dateKey] += item[3];
-      }
-    });
-  });
-
   const dailyData = Object.keys(dailyTotals)
     .sort()
     .map(dateKey => ({
@@ -1593,12 +1582,9 @@ if (isMultiDay) {
 
   chartContainer.classList.remove('hidden');
   drawChart(dailyData);
-
 } else {
   chartContainer.classList.add('hidden');
 }
-
-
       renderTransactions(periodTransactions);
     }
 
@@ -2340,6 +2326,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
