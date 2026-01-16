@@ -1520,18 +1520,17 @@ periodTransactions.forEach(t => {
 
   const tempatMatch = textMatchesKeyword(t.tempat_belanja, kw);
 
-  // 🔥 MODE TEMPAT
   if (tempatMatch) {
-    bahan.forEach(i => {
-      dailyTotals[tanggal] += i[3];
-      totalAmount += i[3];
-    });
-    operasional.forEach(i => {
-      dailyTotals[tanggal] += i[3];
-      totalAmount += i[3];
-    });
-    return;
-  }
+  bahan.forEach(i => {
+    dailyTotals[tanggal] += i[3];
+    totalAmount += i[3];
+  });
+  operasional.forEach(i => {
+    dailyTotals[tanggal] += i[3];
+    totalAmount += i[3];
+  });
+}
+// ❗ JANGAN return
 
   // 🔹 MODE BARANG
   bahan.forEach(i => {
@@ -2332,6 +2331,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
