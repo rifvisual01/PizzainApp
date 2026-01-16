@@ -431,6 +431,8 @@ let currentPhoto = null;
     let allPeriodTransactions = [];
     let currentSearchKeyword = '';
     let adminSuggestions = { tempat: [], barang: [] };
+   let currentFilteredTransactions = [];
+
 
 
 const adminInput = document.getElementById('adminSearchInput');
@@ -1475,7 +1477,9 @@ function filterTransactions(keyword) {
     return bahanMatch || operasionalMatch;
   });
 
-  renderReport(filtered);
+  currentFilteredTransactions = filtered;
+renderReport(filtered);
+
 
   if (filtered.length === 0) {
     showToast(
@@ -1585,25 +1589,7 @@ if (isMultiDay) {
 } else {
   chartContainer.classList.add('hidden');
 }
-      renderTransactions(periodTransactions.filter(t => {
-  const kw = currentSearchKeyword;
-  if (!kw) return true;
-
-  const tempatMatch =
-    typeof t.tempat_belanja === 'string' &&
-    t.tempat_belanja.toLowerCase().includes(kw);
-
-  if (tempatMatch) return true;
-
-  // cek item
-  const items = t.items ? JSON.parse(t.items) : [];
-  const ops = t.operasional ? JSON.parse(t.operasional) : [];
-
-  return (
-    items.some(i => i[0].toLowerCase().includes(kw)) ||
-    ops.some(i => i[0].toLowerCase().includes(kw))
-  );
-}));
+      renderTransactions(currentFilteredTransactions);
     }
 
     function drawChart(dailyData) {
@@ -2344,6 +2330,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
