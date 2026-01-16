@@ -1238,6 +1238,22 @@ function highlight(text, keyword) {
   );
 }
 
+   function itemMatchesKeyword(item, keyword) {
+  if (!keyword) return true;
+  if (!Array.isArray(item)) return false;
+
+  // gabungkan SEMUA string di item
+  const text = item
+    .filter(v => typeof v === 'string')
+    .join(' ')
+    .toLowerCase();
+
+  return text.includes(keyword);
+}
+
+
+
+
 
     /**
      * ============================================
@@ -1277,13 +1293,16 @@ fetch(API_BASE, {
   allPeriodTransactions = data;
   adminSuggestions = buildAdminSuggestions(data);
 
-  currentSearchKeyword = '';
-  adminInput.value = '';
-  adminSuggestBox.classList.add('hidden');
-  clearBtn.classList.add('hidden');
+  // ❌ JANGAN reset keyword & input
+  // currentSearchKeyword = '';
+  // adminInput.value = '';
 
-  renderReport(data);
+  adminSuggestBox.classList.add('hidden');
+
+  // ✅ PAKAI FILTER SEARCH YANG SUDAH ADA
+  filterTransactions(currentSearchKeyword);
 })
+
  .catch(error => {
     showToast('Error loading report: ' + error, 'error');
   })
@@ -1305,16 +1324,38 @@ function buildAdminSuggestions(transactions) {
       tempatSet.add(t.tempat_belanja.trim());
     }
 
-    if (t.items) {
-      try {
-        const items = JSON.parse(t.items);
-        items.forEach(i => {
-          if (i && typeof i[0] === 'string' && i[0].trim()) {
-            barangSet.add(i[0].trim());
+    // bahan baku
+if (t.items) {
+  try {
+    const items = JSON.parse(t.items);
+    items.forEach(i => {
+      if (Array.isArray(i)) {
+        i.forEach(val => {
+          if (typeof val === 'string' && val.trim()) {
+            barangSet.add(val.trim());
           }
         });
-      } catch (e) {}
-    }
+      }
+    });
+  } catch (e) {}
+}
+
+// operasional ✅ TAMBAHAN
+if (t.operasional) {
+  try {
+    const ops = JSON.parse(t.operasional);
+    ops.forEach(i => {
+      if (Array.isArray(i)) {
+        i.forEach(val => {
+          if (typeof val === 'string' && val.trim()) {
+            barangSet.add(val.trim());
+          }
+        });
+      }
+    });
+  } catch (e) {}
+}
+
   });
 
   return {
@@ -1392,42 +1433,62 @@ function handleAdminSearch(raw) {
 function filterTransactions(keyword) {
   currentSearchKeyword = (keyword || '').toLowerCase().trim();
 
+  // keyword kosong → tampilkan semua transaksi periode
   if (!currentSearchKeyword) {
     renderReport(allPeriodTransactions);
     return;
   }
 
-  const filtered = allPeriodTransactions.filter(function (transaction) {
-    const tempat =
-      typeof transaction.tempat_belanja === 'string'
-        ? transaction.tempat_belanja.toLowerCase()
-        : '';
+  const filtered = allPeriodTransactions.filter(transaction => {
 
-    const tempatMatch = tempat.includes(currentSearchKeyword);
+    // 1️⃣ Cek tempat belanja
+    const tempatMatch =
+      typeof transaction.tempat_belanja === 'string' &&
+      transaction.tempat_belanja
+        .toLowerCase()
+        .includes(currentSearchKeyword);
 
-    let itemMatch = false;
+    // 2️⃣ Cek bahan baku
+    let bahanMatch = false;
     if (transaction.items) {
       try {
         const items = JSON.parse(transaction.items);
-        itemMatch = items.some(i =>
-          typeof i[0] === 'string' &&
-          i[0].toLowerCase().includes(currentSearchKeyword)
+        bahanMatch = items.some(item =>
+          itemMatchesKeyword(item, currentSearchKeyword)
         );
-      } catch (e) {}
+      } catch {}
     }
 
-    return tempatMatch || itemMatch;
+    // 3️⃣ Cek operasional
+    let operasionalMatch = false;
+    if (transaction.operasional) {
+      try {
+        const ops = JSON.parse(transaction.operasional);
+        operasionalMatch = ops.some(item =>
+          itemMatchesKeyword(item, currentSearchKeyword)
+        );
+      } catch {}
+    }
+
+    return tempatMatch || bahanMatch || operasionalMatch;
   });
 
   renderReport(filtered);
 
-  // Tampilkan notifikasi hasil pencarian
   if (filtered.length === 0) {
-    showToast('Tidak ada hasil untuk "' + keyword + '"', 'warning');
-  } else {
-    showToast('Ditemukan ' + filtered.length + ' transaksi', 'success');
-  }
+  showToast(
+    'Tidak ada hasil untuk "' + currentSearchKeyword + '"',
+    'warning'
+  );
+} else {
+  showToast(
+    'Ditemukan ' + filtered.length + ' transaksi',
+    'success'
+  );
 }
+}
+
+
 
   
   
