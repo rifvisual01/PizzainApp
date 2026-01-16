@@ -1440,9 +1440,10 @@ function filterTransactions(keyword) {
   currentSearchKeyword = (keyword || '').toLowerCase().trim();
 
   if (!currentSearchKeyword) {
-    renderReport(allPeriodTransactions);
-    return;
-  }
+  currentFilteredTransactions = allPeriodTransactions;
+  renderReport(allPeriodTransactions);
+  return;
+}
 
   const filtered = allPeriodTransactions.filter(transaction => {
 
@@ -1589,7 +1590,11 @@ if (isMultiDay) {
 } else {
   chartContainer.classList.add('hidden');
 }
-      renderTransactions(currentFilteredTransactions);
+      renderTransactions(
+  Array.isArray(currentFilteredTransactions)
+    ? currentFilteredTransactions
+    : periodTransactions
+);
     }
 
     function drawChart(dailyData) {
@@ -2330,6 +2335,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
