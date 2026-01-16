@@ -1585,7 +1585,25 @@ if (isMultiDay) {
 } else {
   chartContainer.classList.add('hidden');
 }
-      renderTransactions(periodTransactions);
+      renderTransactions(periodTransactions.filter(t => {
+  const kw = currentSearchKeyword;
+  if (!kw) return true;
+
+  const tempatMatch =
+    typeof t.tempat_belanja === 'string' &&
+    t.tempat_belanja.toLowerCase().includes(kw);
+
+  if (tempatMatch) return true;
+
+  // cek item
+  const items = t.items ? JSON.parse(t.items) : [];
+  const ops = t.operasional ? JSON.parse(t.operasional) : [];
+
+  return (
+    items.some(i => i[0].toLowerCase().includes(kw)) ||
+    ops.some(i => i[0].toLowerCase().includes(kw))
+  );
+}));
     }
 
     function drawChart(dailyData) {
@@ -2326,6 +2344,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
