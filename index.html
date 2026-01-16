@@ -1242,14 +1242,18 @@ function highlight(text, keyword) {
   if (!keyword) return true;
   if (!Array.isArray(item)) return false;
 
-  // gabungkan SEMUA string di item
-  const text = item
-    .filter(v => typeof v === 'string')
-    .join(' ')
-    .toLowerCase();
+  const kw = keyword.toLowerCase();
 
-  return text.includes(keyword);
+  return item.some(v => {
+    if (typeof v !== 'string') return false;
+
+    return v
+      .toLowerCase()
+      .split(/\s+/)        // pisah kata
+      .some(word => word.startsWith(kw)); // ⬅️ PREFIX MATCH
+  });
 }
+
 
 
 
@@ -1501,15 +1505,18 @@ periodTransactions.forEach(t => {
   const kw = currentSearchKeyword;
 
   const tempatMatch =
-    typeof t.tempat_belanja === 'string' &&
-    t.tempat_belanja.toLowerCase().includes(kw);
+  typeof t.tempat_belanja === 'string' &&
+  t.tempat_belanja.toLowerCase().includes(kw);
 
-  // 🔥 MODE TEMPAT → hitung semua
-  if (kw && tempatMatch) {
-    bahan.forEach(i => totalAmount += i[3]);
-    operasional.forEach(i => totalAmount += i[3]);
-    return;
-  }
+// 🔥 JIKA MATCH TEMPAT → JANGAN FILTER ITEM
+if (kw && tempatMatch) {
+  bahan.forEach(i => totalAmount += i[3]);
+  operasional.forEach(i => totalAmount += i[3]);
+
+  // ⛔️ PENTING: render transaksi TANPA filter item
+  renderFullTransactionCard(t); // ⬅️ pastikan ini dipanggil
+  return;
+}
 
   // 🔹 MODE BARANG
   bahan.forEach(i => {
@@ -2334,6 +2341,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
