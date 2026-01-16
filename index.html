@@ -1433,7 +1433,6 @@ function handleAdminSearch(raw) {
 function filterTransactions(keyword) {
   currentSearchKeyword = (keyword || '').toLowerCase().trim();
 
-  // keyword kosong → tampilkan semua transaksi periode
   if (!currentSearchKeyword) {
     renderReport(allPeriodTransactions);
     return;
@@ -1441,14 +1440,12 @@ function filterTransactions(keyword) {
 
   const filtered = allPeriodTransactions.filter(transaction => {
 
-    // 1️⃣ Cek tempat belanja
     const tempatMatch =
       typeof transaction.tempat_belanja === 'string' &&
       transaction.tempat_belanja
         .toLowerCase()
         .includes(currentSearchKeyword);
 
-    // 2️⃣ Cek bahan baku
     let bahanMatch = false;
     if (transaction.items) {
       try {
@@ -1459,7 +1456,6 @@ function filterTransactions(keyword) {
       } catch {}
     }
 
-    // 3️⃣ Cek operasional
     let operasionalMatch = false;
     if (transaction.operasional) {
       try {
@@ -1470,23 +1466,26 @@ function filterTransactions(keyword) {
       } catch {}
     }
 
-    return tempatMatch || bahanMatch || operasionalMatch;
+    // 🔒 SKEMA FINAL
+    if (tempatMatch) return true;
+    return bahanMatch || operasionalMatch;
   });
 
   renderReport(filtered);
 
   if (filtered.length === 0) {
-  showToast(
-    'Tidak ada hasil untuk "' + currentSearchKeyword + '"',
-    'warning'
-  );
-} else {
-  showToast(
-    'Ditemukan ' + filtered.length + ' transaksi',
-    'success'
-  );
+    showToast(
+      'Tidak ada hasil untuk "' + currentSearchKeyword + '"',
+      'warning'
+    );
+  } else {
+    showToast(
+      'Ditemukan ' + filtered.length + ' transaksi',
+      'success'
+    );
+  }
 }
-}
+
 
 
 
@@ -1496,23 +1495,36 @@ function filterTransactions(keyword) {
     function renderReport(periodTransactions) {
       let totalAmount = 0;
 
-periodTransactions.forEach(function(t) {
+periodTransactions.forEach(t => {
   const bahan = t.items ? JSON.parse(t.items) : [];
   const operasional = t.operasional ? JSON.parse(t.operasional) : [];
   const kw = currentSearchKeyword;
 
-  bahan.forEach(item => {
-    if (!kw || item[0].toLowerCase().includes(kw)) {
-      totalAmount += item[3];
+  const tempatMatch =
+    typeof t.tempat_belanja === 'string' &&
+    t.tempat_belanja.toLowerCase().includes(kw);
+
+  // 🔥 MODE TEMPAT → hitung semua
+  if (kw && tempatMatch) {
+    bahan.forEach(i => totalAmount += i[3]);
+    operasional.forEach(i => totalAmount += i[3]);
+    return;
+  }
+
+  // 🔹 MODE BARANG
+  bahan.forEach(i => {
+    if (!kw || i[0].toLowerCase().includes(kw)) {
+      totalAmount += i[3];
     }
   });
 
-  operasional.forEach(item => {
-    if (!kw || item[0].toLowerCase().includes(kw)) {
-      totalAmount += item[3];
+  operasional.forEach(i => {
+    if (!kw || i[0].toLowerCase().includes(kw)) {
+      totalAmount += i[3];
     }
   });
 });
+
 
       const startObj = new Date(startDate);
       const endObj = new Date(endDate);
@@ -2322,6 +2334,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
