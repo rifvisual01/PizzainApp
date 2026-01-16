@@ -1240,21 +1240,21 @@ function highlight(text, keyword) {
   );
 }
 
-   function itemMatchesKeyword(item, keyword) {
+   function textMatchesKeyword(text, keyword) {
   if (!keyword) return true;
-  if (!Array.isArray(item)) return false;
+  if (!text || typeof text !== 'string') return false;
 
-  const kw = keyword.toLowerCase();
+  const kw = keyword.toLowerCase().trim();
+  const target = text.toLowerCase();
 
-  return item.some(v => {
-    if (typeof v !== 'string') return false;
+  // 🔹 full phrase match (untuk klik suggestion)
+  if (target.includes(kw)) return true;
 
-    return v
-      .toLowerCase()
-      .split(/\s+/)
-      .some(word => word.startsWith(kw));
-  });
+  // 🔹 partial word match (ketik sebagian)
+  const words = target.split(/\s+/);
+  return words.some(w => w.startsWith(kw));
 }
+
 
 
 
@@ -1447,19 +1447,19 @@ function filterTransactions(keyword) {
 
   const filtered = allPeriodTransactions.filter(transaction => {
 
-    const tempatMatch =
-      typeof transaction.tempat_belanja === 'string' &&
-      transaction.tempat_belanja
-        .toLowerCase()
-        .includes(currentSearchKeyword);
+    const tempatMatch = textMatchesKeyword(
+  transaction.tempat_belanja,
+  currentSearchKeyword
+);
+
 
     let bahanMatch = false;
     if (transaction.items) {
       try {
         const items = JSON.parse(transaction.items);
         bahanMatch = items.some(item =>
-          itemMatchesKeyword(item, currentSearchKeyword)
-        );
+  textMatchesKeyword(item[0], currentSearchKeyword)
+);
       } catch {}
     }
 
@@ -1518,10 +1518,7 @@ periodTransactions.forEach(t => {
     dailyTotals[tanggal] = 0;
   }
 
-  const tempatMatch =
-    kw &&
-    typeof t.tempat_belanja === 'string' &&
-    t.tempat_belanja.toLowerCase().includes(kw);
+  const tempatMatch = textMatchesKeyword(t.tempat_belanja, kw);
 
   // 🔥 MODE TEMPAT
   if (tempatMatch) {
@@ -1538,18 +1535,18 @@ periodTransactions.forEach(t => {
 
   // 🔹 MODE BARANG
   bahan.forEach(i => {
-    if (!kw || i[0].toLowerCase().includes(kw)) {
-      dailyTotals[tanggal] += i[3];
-      totalAmount += i[3];
-    }
-  });
+  if (!kw || textMatchesKeyword(i[0], kw)) {
+    dailyTotals[tanggal] += i[3];
+    totalAmount += i[3];
+  }
+});
 
   operasional.forEach(i => {
-    if (!kw || i[0].toLowerCase().includes(kw)) {
-      dailyTotals[tanggal] += i[3];
-      totalAmount += i[3];
-    }
-  });
+  if (!kw || textMatchesKeyword(i[0], kw)) {
+    dailyTotals[tanggal] += i[3];
+    totalAmount += i[3];
+  }
+});
 });
 
 
@@ -2335,6 +2332,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
