@@ -1240,26 +1240,6 @@ function highlight(text, keyword) {
   );
 }
 
-   function textMatchesKeyword(text, keyword) {
-  if (!keyword) return true;
-  if (!text || typeof text !== 'string') return false;
-
-  const kw = keyword.toLowerCase().trim();
-  const target = text.toLowerCase();
-
-  // 🔹 full phrase match (untuk klik suggestion)
-  if (target.includes(kw)) return true;
-
-  // 🔹 partial word match (ketik sebagian)
-  const words = target.split(/\s+/);
-  return words.some(w => w.startsWith(kw));
-}
-
-
-
-
-
-
 
     /**
      * ============================================
@@ -1299,16 +1279,13 @@ fetch(API_BASE, {
   allPeriodTransactions = data;
   adminSuggestions = buildAdminSuggestions(data);
 
-  // ❌ JANGAN reset keyword & input
-  // currentSearchKeyword = '';
-  // adminInput.value = '';
-
+  currentSearchKeyword = '';
+  adminInput.value = '';
   adminSuggestBox.classList.add('hidden');
+  clearBtn.classList.add('hidden');
 
-  // ✅ PAKAI FILTER SEARCH YANG SUDAH ADA
-  filterTransactions(currentSearchKeyword);
+  renderReport(data);
 })
-
  .catch(error => {
     showToast('Error loading report: ' + error, 'error');
   })
@@ -1324,51 +1301,46 @@ if (adminSuggestBox) adminSuggestBox.classList.add('hidden');
 function buildAdminSuggestions(transactions) {
   const tempatSet = new Set();
   const barangSet = new Set();
+  const operasionalSet = new Set();
 
   transactions.forEach(t => {
+    // TEMPAT BELANJA
     if (typeof t.tempat_belanja === 'string' && t.tempat_belanja.trim()) {
       tempatSet.add(t.tempat_belanja.trim());
     }
 
-    // bahan baku
-if (t.items) {
-  try {
-    const items = JSON.parse(t.items);
-    items.forEach(i => {
-      if (Array.isArray(i)) {
-        i.forEach(val => {
-          if (typeof val === 'string' && val.trim()) {
-            barangSet.add(val.trim());
+    // BAHAN BAKU
+    if (t.items) {
+      try {
+        const items = JSON.parse(t.items);
+        items.forEach(i => {
+          if (i && typeof i[0] === 'string' && i[0].trim()) {
+            barangSet.add(i[0].trim());
           }
         });
-      }
-    });
-  } catch (e) {}
-}
+      } catch (e) {}
+    }
 
-// operasional ✅ TAMBAHAN
-if (t.operasional) {
-  try {
-    const ops = JSON.parse(t.operasional);
-    ops.forEach(i => {
-      if (Array.isArray(i)) {
-        i.forEach(val => {
-          if (typeof val === 'string' && val.trim()) {
-            barangSet.add(val.trim());
+    // 🔥 OPERASIONAL (BARU)
+    if (t.operasional) {
+      try {
+        const ops = JSON.parse(t.operasional);
+        ops.forEach(o => {
+          if (o && typeof o[0] === 'string' && o[0].trim()) {
+            operasionalSet.add(o[0].trim());
           }
         });
-      }
-    });
-  } catch (e) {}
-}
-
+      } catch (e) {}
+    }
   });
 
   return {
     tempat: Array.from(tempatSet),
-    barang: Array.from(barangSet)
+    barang: Array.from(barangSet),
+    operasional: Array.from(operasionalSet)
   };
 }
+
 function setLoadReportLoading(isLoading) {
   const btn = document.getElementById('btnLoadReport');
   if (!btn) return;
@@ -1397,7 +1369,7 @@ function setLoadReportLoading(isLoading) {
 function handleAdminSearch(raw) {
   const keyword = raw.trim().toLowerCase();
 
-  // KOSONG → tampilkan semua transaksi periode
+  // KOSONG → reset
   if (!keyword) {
     adminSuggestBox.classList.add('hidden');
     clearBtn.classList.add('hidden');
@@ -1407,6 +1379,12 @@ function handleAdminSearch(raw) {
 
   clearBtn.classList.remove('hidden');
 
+  // 🔥 PENTING: FILTER LANGSUNG JALAN (FUZZY SEARCH)
+  filterTransactions(keyword);
+
+  // =========================
+  // SUGGESTION (OPSIONAL)
+  // =========================
   const tempatMatch = adminSuggestions.tempat.filter(v =>
     v.toLowerCase().includes(keyword)
   );
@@ -1415,11 +1393,16 @@ function handleAdminSearch(raw) {
     v.toLowerCase().includes(keyword)
   );
 
-  const results = [...new Set([...tempatMatch, ...barangMatch])].slice(0, 8);
+  const operasionalMatch = (adminSuggestions.operasional || []).filter(v =>
+    v.toLowerCase().includes(keyword)
+  );
+
+  const results = [
+    ...new Set([...tempatMatch, ...barangMatch, ...operasionalMatch])
+  ].slice(0, 8);
 
   if (!results.length) {
     adminSuggestBox.classList.add('hidden');
-    filterTransactions(keyword);
     return;
   }
 
@@ -1435,113 +1418,93 @@ function handleAdminSearch(raw) {
 
 
 
+
 // ⭐ FUNCTION UNTUK FILTER BERDASARKAN SEARCH
 function filterTransactions(keyword) {
   currentSearchKeyword = (keyword || '').toLowerCase().trim();
 
   if (!currentSearchKeyword) {
-  currentFilteredTransactions = allPeriodTransactions;
-  renderReport(allPeriodTransactions);
-  return;
-}
+    renderReport(allPeriodTransactions);
+    return;
+  }
 
-  const filtered = allPeriodTransactions.filter(transaction => {
+  const filtered = allPeriodTransactions.filter(function (transaction) {
+    const tempat =
+      typeof transaction.tempat_belanja === 'string'
+        ? transaction.tempat_belanja.toLowerCase()
+        : '';
 
-    const tempatMatch = textMatchesKeyword(
-  transaction.tempat_belanja,
-  currentSearchKeyword
-);
+    const tempatMatch = tempat.includes(currentSearchKeyword);
 
-
-    let bahanMatch = false;
+    let itemMatch = false;
     if (transaction.items) {
       try {
         const items = JSON.parse(transaction.items);
-        bahanMatch = items.some(item =>
-  textMatchesKeyword(item[0], currentSearchKeyword)
-);
-      } catch {}
+        itemMatch = items.some(i =>
+          typeof i[0] === 'string' &&
+          i[0].toLowerCase().includes(currentSearchKeyword)
+        );
+      } catch (e) {}
     }
 
     let operasionalMatch = false;
     if (transaction.operasional) {
       try {
         const ops = JSON.parse(transaction.operasional);
-        operasionalMatch = ops.some(item =>
-          itemMatchesKeyword(item, currentSearchKeyword)
+        operasionalMatch = ops.some(o =>
+          typeof o[0] === 'string' &&
+          o[0].toLowerCase().includes(currentSearchKeyword)
         );
-      } catch {}
+      } catch (e) {}
     }
 
-    // 🔒 SKEMA FINAL
-    if (tempatMatch) return true;
-    return bahanMatch || operasionalMatch;
+    return tempatMatch || itemMatch || operasionalMatch;
   });
 
-  currentFilteredTransactions = filtered;
-renderReport(filtered);
-
-
-  if (filtered.length === 0) {
-    showToast(
-      'Tidak ada hasil untuk "' + currentSearchKeyword + '"',
-      'warning'
-    );
-  } else {
-    showToast(
-      'Ditemukan ' + filtered.length + ' transaksi',
-      'success'
-    );
-  }
+  renderReport(filtered);
 }
- 
-
     function renderReport(periodTransactions) {
-     const dailyTotals = {};
-let totalAmount = 0;
+      let totalAmount = 0;
 
-periodTransactions.forEach(t => {
-  const bahan = t.items ? JSON.parse(t.items) : [];
-  const operasional = t.operasional ? JSON.parse(t.operasional) : [];
-  const kw = currentSearchKeyword;
+     function isPlaceMatch(transaction) {
+  if (!currentSearchKeyword) return false;
+  if (!transaction.tempat_belanja) return false;
 
-  const tanggal = new Date(t.created_at)
-    .toISOString()
-    .slice(0, 10);
-
-  if (!dailyTotals[tanggal]) {
-    dailyTotals[tanggal] = 0;
-  }
-
-  const tempatMatch = textMatchesKeyword(t.tempat_belanja, kw);
-
-  if (tempatMatch) {
-  bahan.forEach(i => {
-    dailyTotals[tanggal] += i[3];
-    totalAmount += i[3];
-  });
-  operasional.forEach(i => {
-    dailyTotals[tanggal] += i[3];
-    totalAmount += i[3];
-  });
+  return transaction.tempat_belanja
+    .toLowerCase()
+    .includes(currentSearchKeyword);
 }
 
-  // 🔹 MODE BARANG
-  bahan.forEach(i => {
-  if (!kw || textMatchesKeyword(i[0], kw)) {
-    dailyTotals[tanggal] += i[3];
-    totalAmount += i[3];
-  }
-});
+     const isSearching = typeof currentSearchKeyword === 'string' && currentSearchKeyword.length > 0;
 
-  operasional.forEach(i => {
-  if (!kw || textMatchesKeyword(i[0], kw)) {
-    dailyTotals[tanggal] += i[3];
-    totalAmount += i[3];
-  }
-});
-});
+function itemMatch(name) {
+  if (!isSearching) return true;
+  return name.toLowerCase().includes(currentSearchKeyword);
+}
 
+      periodTransactions.forEach(function(t) {
+        const bahan = t.items ? JSON.parse(t.items) : [];
+const operasional = t.operasional ? JSON.parse(t.operasional) : [];
+
+if (isPlaceMatch(t)) {
+  // 🔵 MODE TEMPAT → hitung SEMUA
+  bahan.forEach(item => totalAmount += item[3]);
+  operasional.forEach(item => totalAmount += item[3]);
+} else {
+  // 🟢 MODE ITEM → logika lama (TIDAK DIUBAH)
+  bahan.forEach(item => {
+    if (itemMatch(item[0])) {
+      totalAmount += item[3];
+    }
+  });
+
+  operasional.forEach(item => {
+    if (itemMatch(item[0])) {
+      totalAmount += item[3];
+    }
+  });
+}
+        });
 
       const startObj = new Date(startDate);
       const endObj = new Date(endDate);
@@ -1562,29 +1525,51 @@ periodTransactions.forEach(t => {
 }
 
       const chartContainer = document.getElementById('chartContainer');
+      if (isMultiDay) {
+        const dailyTotals = {};
+        
+        periodTransactions.forEach(function(t) {
+          const dateKey = new Date(t.created_at).toISOString().split('T')[0];
+          if (!dailyTotals[dateKey]) {
+            dailyTotals[dateKey] = 0;
+          }
+          const bahan = t.items ? JSON.parse(t.items) : [];
+const operasional = t.operasional ? JSON.parse(t.operasional) : [];
 
-if (isMultiDay) {
-  const dailyData = Object.keys(dailyTotals)
-    .sort()
-    .map(dateKey => ({
-      date: dateKey,
-      label: new Date(dateKey).toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'short'
-      }),
-      total: dailyTotals[dateKey]
-    }));
-
-  chartContainer.classList.remove('hidden');
-  drawChart(dailyData);
+if (isPlaceMatch(t)) {
+  bahan.forEach(item => dailyTotals[dateKey] += item[3]);
+  operasional.forEach(item => dailyTotals[dateKey] += item[3]);
 } else {
-  chartContainer.classList.add('hidden');
+  bahan.forEach(item => {
+    if (itemMatch(item[0])) {
+      dailyTotals[dateKey] += item[3];
+    }
+  });
+
+  operasional.forEach(item => {
+    if (itemMatch(item[0])) {
+      dailyTotals[dateKey] += item[3];
+    }
+  });
 }
-      renderTransactions(
-  Array.isArray(currentFilteredTransactions)
-    ? currentFilteredTransactions
-    : periodTransactions
-);
+        });
+
+        const dailyData = Object.keys(dailyTotals).sort().map(function(dateKey) {
+          const dateObj = new Date(dateKey);
+          return {
+            date: dateKey,
+            label: dateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
+            total: dailyTotals[dateKey]
+          };
+        });
+
+        chartContainer.classList.remove('hidden');
+        drawChart(dailyData);
+      } else {
+        chartContainer.classList.add('hidden');
+      }
+
+      renderTransactions(periodTransactions);
     }
 
     function drawChart(dailyData) {
@@ -1669,33 +1654,13 @@ if (isMultiDay) {
         const groupedByDate = {};
         
         transactions.forEach(function(transaction) {
-         const bahan = transaction.items
+          const bahan = transaction.items
   ? JSON.parse(transaction.items)
   : [];
 
 const operasional = transaction.operasional
   ? JSON.parse(transaction.operasional)
   : [];
-
-          const kw = currentSearchKeyword;
-
-const filteredBahan = bahan.filter(item =>
-  !kw || item[0].toLowerCase().includes(kw)
-);
-
-const filteredOperasional = operasional.filter(item =>
-  !kw || item[0].toLowerCase().includes(kw)
-);
-
-if (
-  currentSearchKeyword &&
-  filteredBahan.length === 0 &&
-  filteredOperasional.length === 0
-) {
-  return;
-}
-
-
 
           const dateKey = new Date(transaction.created_at).toISOString().split('T')[0];
           if (!groupedByDate[dateKey]) {
@@ -1812,19 +1777,14 @@ const operasional = transaction.operasional
             const timeObj = new Date(transaction.created_at);
             const waktu = timeObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
             
-          let transactionTotal = 0;
-const kw = currentSearchKeyword;
+            let transactionTotal = 0;
 
 bahan.forEach(item => {
-  if (!kw || item[0].toLowerCase().includes(kw)) {
-    transactionTotal += item[3];
-  }
+  transactionTotal += item[3];
 });
 
 operasional.forEach(item => {
-  if (!kw || item[0].toLowerCase().includes(kw)) {
-    transactionTotal += item[3];
-  }
+  transactionTotal += item[3];
 });
 
 
@@ -1917,31 +1877,12 @@ const operasional = transaction.operasional
   : [];
 
           const dateObj = new Date(transaction.created_at);
-const tanggal = dateObj.toLocaleDateString('id-ID', {
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric'
-});
-const waktu = dateObj.toLocaleTimeString('id-ID', {
-  hour: '2-digit',
-  minute: '2-digit'
-});
-
-let transactionTotal = 0;
-const kw = currentSearchKeyword;
-
-bahan.forEach(item => {
-  if (!kw || item[0].toLowerCase().includes(kw)) {
-    transactionTotal += item[3];
-  }
-});
-
-operasional.forEach(item => {
-  if (!kw || item[0].toLowerCase().includes(kw)) {
-    transactionTotal += item[3];
-  }
-});
-
+          const tanggal = dateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+          const waktu = dateObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+          
+          let transactionTotal = 0;
+bahan.forEach(item => transactionTotal += item[3]);
+operasional.forEach(item => transactionTotal += item[3]);
 
 
           const card = document.createElement('div');
@@ -2313,7 +2254,16 @@ function preloadSuggestions() {
 function selectAdminSuggestion(value) {
   adminInput.value = value;
   adminSuggestBox.classList.add('hidden');
+  clearBtn.classList.remove('hidden');
+
   filterTransactions(value);
+
+  const count = document.querySelectorAll('#transactionsList > div').length;
+  if (count === 0) {
+    showToast(`Tidak ada transaksi untuk "${value}"`, 'warning');
+  } else {
+    showToast(`Ditemukan ${count} transaksi`, 'success');
+  }
 }
 document.addEventListener('click', function (e) {
   if (!adminInput.contains(e.target) && !adminSuggestBox.contains(e.target)) {
@@ -2325,43 +2275,3 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
