@@ -489,7 +489,7 @@ function renderPhotoPreview(url) {
   box.appendChild(img);
 }
 
-/* ===========================
+===========================
     FILTER & RENDER
    =========================== */
 
@@ -664,6 +664,10 @@ window.addEventListener('popstate', function (event) {
     function verifyPin() {
   const enteredPin = document.getElementById('pinInput').value;
 
+  if (!enteredPin) return;
+
+  setAdminLoading(true); // 🔥 START ANIMASI
+
   const fd = new FormData();
   fd.append('action', 'verifyAdminPin');
   fd.append('pin', enteredPin);
@@ -674,6 +678,8 @@ window.addEventListener('popstate', function (event) {
   })
     .then(res => res.json())
     .then(result => {
+      setAdminLoading(false); // 🔥 STOP ANIMASI
+
       if (result.success) {
         hidePinPopup();
         navigate('admin');
@@ -685,9 +691,11 @@ window.addEventListener('popstate', function (event) {
       }
     })
     .catch(error => {
+      setAdminLoading(false); // 🔥 PASTI BERHENTI
       showToast('Error: ' + error, 'error');
     });
 }
+
 
 
     /**
@@ -1465,6 +1473,11 @@ function filterTransactions(keyword) {
 }
     function renderReport(periodTransactions) {
       let totalAmount = 0;
+let totalBahan = 0;
+let totalOperasional = 0;
+
+let countBahan = 0;
+let countOperasional = 0;
 
      function isPlaceMatch(transaction) {
   if (!currentSearchKeyword) return false;
@@ -1485,6 +1498,38 @@ function itemMatch(name) {
       periodTransactions.forEach(function(t) {
         const bahan = t.items ? JSON.parse(t.items) : [];
 const operasional = t.operasional ? JSON.parse(t.operasional) : [];
+
+       bahan.forEach(item => {
+  // MODE TEMPAT → hitung semua
+  if (isPlaceMatch(t)) {
+    totalBahan += item[3];
+    countBahan++;
+    return;
+  }
+
+  // MODE BARANG / TANPA SEARCH
+  if (!currentSearchKeyword || itemMatch(item[0])) {
+    totalBahan += item[3];
+    countBahan++;
+  }
+});
+
+operasional.forEach(item => {
+  // MODE TEMPAT → hitung semua
+  if (isPlaceMatch(t)) {
+    totalOperasional += item[3];
+    countOperasional++;
+    return;
+  }
+
+  // MODE BARANG / TANPA SEARCH
+  if (!currentSearchKeyword || itemMatch(item[0])) {
+    totalOperasional += item[3];
+    countOperasional++;
+  }
+});
+
+
 
 if (isPlaceMatch(t)) {
   // 🔵 MODE TEMPAT → hitung SEMUA
@@ -1519,7 +1564,27 @@ if (isPlaceMatch(t)) {
 
       document.getElementById('periodLabel').textContent = periodLabel;
       document.getElementById('periodTotalAmount').textContent = 'Rp ' + totalAmount.toLocaleString('id-ID');
-      document.getElementById('periodTotalTransactions').textContent = periodTransactions.length;
+     
+
+     // ===== BAHAN BAKU (AMAN) =====
+const bahanAmountEl = document.getElementById('bahanTotalAmount');
+const bahanCountEl = document.getElementById('bahanTotalTransactions');
+
+if (bahanAmountEl && bahanCountEl) {
+  bahanAmountEl.textContent = 'Rp ' + totalBahan.toLocaleString('id-ID');
+  bahanCountEl.textContent = countBahan;
+}
+
+// ===== OPERASIONAL (AMAN) =====
+const operasionalAmountEl = document.getElementById('operasionalTotalAmount');
+const operasionalCountEl = document.getElementById('operasionalTotalTransactions');
+
+if (operasionalAmountEl && operasionalCountEl) {
+  operasionalAmountEl.textContent =
+    'Rp ' + totalOperasional.toLocaleString('id-ID');
+  operasionalCountEl.textContent = countOperasional;
+}
+
       if (currentSearchKeyword) {
   document.getElementById('periodLabel').textContent = periodLabel + ' (Hasil pencarian: "' + currentSearchKeyword + '")';
 }
@@ -1632,6 +1697,9 @@ if (isPlaceMatch(t)) {
      * ⭐ PERUBAHAN UTAMA: Render daily cards dengan design red card
      */
     function renderTransactions(transactions) {
+ document.getElementById('periodTotalTransactions').textContent =
+    transactions.length;
+     
       const container = document.getElementById('transactionsList');
       const emptyState = document.getElementById('emptyState');
 
@@ -1751,7 +1819,7 @@ dayCard.className = `
           ${uniquePlacesCount}
         </p>
         <p class="text-xs opacity-90 leading-none mt-0.5">
-          Tempat
+          User
         </p>
       </div>
 
@@ -2200,7 +2268,7 @@ ctx.drawImage(
 );
 
 
-  const base64Data = canvas.toDataURL('image/jpeg', 0.85);
+  const base64Data = canvas.toDataURL('image/jpeg', 0.9);
 
   stopCamera(); // 🔒 matikan kamera
 
@@ -2258,7 +2326,9 @@ function selectAdminSuggestion(value) {
 
   filterTransactions(value);
 
-  const count = document.querySelectorAll('#transactionsList > div').length;
+  const count = Number(
+  document.getElementById('periodTotalTransactions')?.textContent || 0
+);
   if (count === 0) {
     showToast(`Tidak ada transaksi untuk "${value}"`, 'warning');
   } else {
