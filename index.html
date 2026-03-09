@@ -2357,11 +2357,51 @@ ctx.drawImage(
     const result = await res.json();
 
     if (result.success) {
-      currentPhoto = result.url;
-      currentPhotoFileId = result.fileId;
-      renderPhotoPreview(normalizeDriveImage(result.url));
-      showToast('Foto berhasil diambil', 'success');
+
+  currentPhoto = result.url;
+  currentPhotoFileId = result.fileId;
+
+  renderPhotoPreview(normalizeDriveImage(result.url));
+
+  showToast('Foto berhasil diambil', 'success');
+
+  // 🔥 AUTO SAVE FOTO KE DATABASE
+  const tempat = document.getElementById('tempatBelanja').value.trim();
+
+  if (tempat) {
+
+    const fd2 = new FormData();
+
+    if (currentDraftId) {
+      fd2.append('action', 'updateTransaksi');
+      fd2.append('id', currentDraftId);
     } else {
+      fd2.append('action', 'createTransaksi');
+    }
+
+    fd2.append('tempat_belanja', tempat);
+    fd2.append('items', JSON.stringify(items || []));
+    fd2.append('operasional', JSON.stringify(operasional || []));
+    fd2.append('foto_url', currentPhoto);
+    fd2.append('foto_file_id', currentPhotoFileId);
+    fd2.append('status', 'draft');
+
+    fetch(API_BASE, {
+      method: 'POST',
+      body: fd2
+    })
+    .then(r => r.json())
+    .then(res => {
+
+      if (res.success && !currentDraftId) {
+        currentDraftId = res.id;
+      }
+
+    });
+
+  }
+
+} else {
       showToast(result.message || 'Upload gagal', 'error');
     }
   } catch (err) {
@@ -2418,5 +2458,6 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
