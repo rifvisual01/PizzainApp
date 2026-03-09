@@ -609,7 +609,7 @@ function renderSuggestion(boxId, items, onSelect) {
       const toast = document.getElementById('toast');
       const toastMessage = document.getElementById('toastMessage');
       const toastIcon = document.getElementById('toastIcon');
-      const toastContainer = toast.querySelector('div');
+      const toastContainer = document.querySelector('#toast > div');
       
       toastMessage.textContent = message;
       
@@ -646,7 +646,7 @@ function renderSuggestion(boxId, items, onSelect) {
         toastIcon.style.backgroundColor = '#F59E0B';
         toastContainer.style.borderLeftColor = '#F59E0B';
       }
-      
+      toast.style.opacity = "1";
       toast.classList.remove('hidden');
       toast.classList.add('toast-show');
       
@@ -2460,6 +2460,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
