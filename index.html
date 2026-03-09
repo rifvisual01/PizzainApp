@@ -2356,6 +2356,8 @@ ctx.drawImage(
     const res = await fetch(API_BASE, { method: 'POST', body: fd });
     const result = await res.json();
 
+   const result = await res.json();
+console.log("UPLOAD RESPONSE:", result);
     if (result.success) {
 
   currentPhoto = result.url;
@@ -2458,6 +2460,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
