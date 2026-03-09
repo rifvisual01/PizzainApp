@@ -494,25 +494,24 @@ const adminInput = document.getElementById('adminSearchInput');
 const adminSuggestBox = document.getElementById('adminSuggestBox');
 const clearBtn = document.getElementById('clearAdminSearchBtn');
 
-if (adminInput) {
-  adminInput.addEventListener('input', function () {
-    clearTimeout(searchTimer);
-    const value = this.value;
 
-    searchTimer = setTimeout(() => {
-      handleAdminSearch(value);
-    }, 150);
-  });
-}
+    let searchTimer;
+adminInput.addEventListener('input', function () {
+  clearTimeout(searchTimer);
+  const value = this.value;
 
-if (clearBtn) {
-  clearBtn.addEventListener('click', function () {
-    adminInput.value = '';
-    adminSuggestBox.classList.add('hidden');
-    this.classList.add('hidden');
-    filterTransactions('');
-  });
-}
+  searchTimer = setTimeout(() => {
+    handleAdminSearch(value);
+  }, 150);
+});
+
+
+clearBtn.addEventListener('click', function () {
+  adminInput.value = '';
+  adminSuggestBox.classList.add('hidden');
+  this.classList.add('hidden');
+  filterTransactions('');
+});
 
    function setAdminLoading(isLoading) {
   const btn = document.getElementById('btnSubmitPin');
@@ -2415,14 +2414,9 @@ document.addEventListener('click', function (e) {
   }
 });
 
-document.addEventListener("DOMContentLoaded", function () {
-  initEventListeners();
-});
-   
+
   </script>
  </body>
 </html>
-
-
 
 
