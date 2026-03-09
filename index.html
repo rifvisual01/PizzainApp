@@ -2352,13 +2352,13 @@ ctx.drawImage(
   fd.append('base64', base64Data);
   fd.append('fileName', 'foto-' + Date.now() + '.jpg');
 
-  try {
-    const res = await fetch(API_BASE, { method: 'POST', body: fd });
-    const result = await res.json();
+ try {
+  const res = await fetch(API_BASE, { method: 'POST', body: fd });
 
-   const result = await res.json();
-console.log("UPLOAD RESPONSE:", result);
-    if (result.success) {
+  const result = await res.json();
+  console.log("UPLOAD RESPONSE:", result);
+
+  if (result.success) {
 
   currentPhoto = result.url;
   currentPhotoFileId = result.fileId;
@@ -2460,6 +2460,7 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
+
 
 
 
