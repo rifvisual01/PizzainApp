@@ -190,9 +190,10 @@
   <!-- Jumlah -->
   <div class="col-span-3">
     <label class="block text-sm font-medium text-gray-600 mb-1">Jumlah</label>
-    <input type="number" id="jumlahBarang"
+    <input type="text" id="jumlahBarang"
       class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-red-500 focus:outline-none"
-      value="1" min="1">
+      inputmode="decimal"
+      placeholder="Jumlah">
   </div>
 
   <!-- Harga -->
@@ -1021,12 +1022,27 @@ if (draft.status !== 'draft') {
      * FORM - MANAGE ITEMS
      * ============================================
      */
-    function addItemToList(type) {
+function parseDecimalInput(value) {
+  const raw = String(value).trim();
+  if (!/^\d+([,.]\d+)?$/.test(raw)) return NaN;
+
+  const normalized = raw.replace(',', '.');
+  const number = parseFloat(normalized);
+  return Number.isFinite(number) ? number : NaN;
+}
+
+function formatQty(value) {
+  return Number(value).toLocaleString('id-ID', {
+    maximumFractionDigits: 3
+  });
+}
+
+    function addItemToList(type = 'bahan') {
   const nama = document.getElementById('namaBarang').value.trim();
-  const qty = parseInt(document.getElementById('jumlahBarang').value);
+  const qty = parseDecimalInput(document.getElementById('jumlahBarang').value);
   const harga = parseInt(document.getElementById('hargaBarang').value);
 
-  if (!nama || !qty || !harga) {
+  if (!nama || !Number.isFinite(qty) || qty <= 0 || !harga) {
     showToast('Lengkapi data barang', 'warning');
     return;
   }
@@ -1043,7 +1059,7 @@ if (draft.status !== 'draft') {
 
   // reset input
   document.getElementById('namaBarang').value = '';
-  document.getElementById('jumlahBarang').value = '1';
+  document.getElementById('jumlahBarang').value = '';
   document.getElementById('hargaBarang').value = '';
 }
 
@@ -1056,14 +1072,14 @@ function renderList(arr, listId, containerId) {
   arr.forEach((item, i) => {
     const row = document.createElement('div');
     row.className =
-  'flex justify-between items-center px-2 py-1.5 border-b border-gray-200 last:border-b-0 hover:bg-gray-200/50';
+  'flex justify-between items-center px-2 py-1.5 border-b border-gray-200 last:border-b-0 hover:bg-gray-200/50 cursor-pointer';
 
 
     row.innerHTML = `
       <div>
         <div class="font-medium">${i + 1}. ${item[0]}</div>
         <div class="text-[12px] text-gray-500 leading-tight">
-          ${item[1]}x @ Rp ${item[2].toLocaleString('id-ID')}
+          ${formatQty(item[1])}x @ Rp ${item[2].toLocaleString('id-ID')}
         </div>
       </div>
 
@@ -1075,6 +1091,7 @@ function renderList(arr, listId, containerId) {
         <button
           class="text-red-500 hover:text-red-700 text-lg font-bold"
           aria-label="Hapus item"
+          type="button"
         >
           ×
         </button>
@@ -1082,6 +1099,23 @@ function renderList(arr, listId, containerId) {
     `;
 
     // 🔥 EVENT HAPUS
+    row.addEventListener('click', (event) => {
+      if (event.target.closest('button')) return;
+
+      document.getElementById('namaBarang').value = item[0];
+      document.getElementById('jumlahBarang').value = String(item[1]).replace('.', ',');
+      document.getElementById('hargaBarang').value = item[2];
+
+      arr.splice(i, 1);
+      renderList(arr, listId, containerId);
+
+      if (arr.length === 0) {
+        container.classList.add('hidden');
+      }
+
+      document.getElementById('namaBarang').focus();
+    });
+
     row.querySelector('button').addEventListener('click', () => {
       arr.splice(i, 1);
       renderList(arr, listId, containerId);
@@ -1293,7 +1327,7 @@ function resetForm() {
   document.getElementById('tempatBelanja').value = '';
   document.getElementById('namaBarang').value = '';
   document.getElementById('hargaBarang').value = '';
-  document.getElementById('jumlahBarang').value = '1';
+  document.getElementById('jumlahBarang').value = '';
 
   // 🔥 RESET DATA
   items = [];
@@ -2476,10 +2510,3 @@ document.addEventListener('click', function (e) {
   </script>
  </body>
 </html>
-
-
-
-
-
-
-
