@@ -389,6 +389,12 @@
       </div>
       <div><label class="block text-xs text-gray-600 mb-1">Tanggal Akhir</label> <input type="date" id="endDateSelector" class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:outline-none transition-colors">
       </div>
+     </div>
+     <div class="mb-4">
+      <label class="block text-xs text-gray-600 mb-1">User</label>
+      <select id="reportUserSelector" class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-red-500 focus:outline-none transition-colors bg-white">
+       <option value="all">Semua</option>
+      </select>
      </div><button id="btnLoadReport" class="w-full px-6 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-colors flex items-center justify-center gap-2">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
       </svg><span>Tampilkan Laporan</span> </button>
@@ -501,11 +507,13 @@ let currentPhoto = null;
     let currentSearchKeyword = '';
     let adminSuggestions = { tempat: [], barang: [] };
     let currentInsightDetail = null;
+    let selectedReportUser = 'all';
 
 
 const adminInput = document.getElementById('adminSearchInput');
 const adminSuggestBox = document.getElementById('adminSuggestBox');
 const clearBtn = document.getElementById('clearAdminSearchBtn');
+const reportUserSelector = document.getElementById('reportUserSelector');
 
 const shoppingTables = {
   expenses: window.STOCK_APP_CONFIG?.supabaseTables?.shoppingExpenses || 'shopping_expenses',
@@ -616,10 +624,64 @@ function composeShoppingTransactions(expenses, itemRows, operationalRows) {
       foto_url: expense.foto_url || '',
       foto_file_id: expense.foto_file_id || '',
       status: expense.status || 'draft',
+      user_name: expense.user_name || '',
       created_at: expense.created_at,
       updated_at: expense.updated_at
     };
   });
+}
+
+function getParentWindowSafe() {
+  try {
+    if (window.parent && window.parent !== window && window.parent.location.origin === window.location.origin) {
+      return window.parent;
+    }
+  } catch (error) {}
+  return null;
+}
+
+function getCurrentShoppingUserName() {
+  const parentWindow = getParentWindowSafe();
+  const parentUser = parentWindow?.currentUser;
+  if (parentUser?.name) return parentUser.name;
+  return '';
+}
+
+function getShoppingReportUsers() {
+  const parentWindow = getParentWindowSafe();
+  const parentUsers = typeof parentWindow?.getUsers === 'function' ? parentWindow.getUsers() : [];
+  const userNames = parentUsers
+    .map(function(user) { return user && user.name; })
+    .filter(Boolean);
+
+  allPeriodTransactions.forEach(function(transaction) {
+    if (transaction.user_name) userNames.push(transaction.user_name);
+  });
+
+  return Array.from(new Set(userNames)).sort(function(a, b) {
+    return a.localeCompare(b, 'id-ID', { sensitivity: 'base' });
+  });
+}
+
+function escapeHtml(value) {
+  return String(value || '').replace(/[&<>"']/g, function(char) {
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char];
+  });
+}
+
+function escapeHtmlAttr(value) {
+  return escapeHtml(value);
+}
+
+function populateReportUserSelector() {
+  if (!reportUserSelector) return;
+  const previousValue = selectedReportUser || reportUserSelector.value || 'all';
+  const users = getShoppingReportUsers();
+  reportUserSelector.innerHTML = '<option value="all">Semua</option>' + users.map(function(name) {
+    return '<option value="' + escapeHtmlAttr(name) + '">' + escapeHtml(name) + '</option>';
+  }).join('');
+  selectedReportUser = previousValue !== 'all' && users.includes(previousValue) ? previousValue : 'all';
+  reportUserSelector.value = selectedReportUser;
 }
 
 async function loadShoppingDetails(expenseIds) {
@@ -633,7 +695,7 @@ async function loadShoppingDetails(expenseIds) {
 
 async function fetchShoppingTransactions(filters) {
   const params = new URLSearchParams();
-  params.set('select', 'id,tempat_belanja,status,foto_url,foto_file_id,created_at,updated_at');
+  params.set('select', 'id,tempat_belanja,status,foto_url,foto_file_id,user_name,created_at,updated_at');
   params.set('order', 'created_at.desc');
   params.set('deleted_at', 'is.null');
 
@@ -641,7 +703,13 @@ async function fetchShoppingTransactions(filters) {
   if (filters?.startDate) params.set('created_at', 'gte.' + filters.startDate + 'T00:00:00.000Z');
   if (filters?.endDate) params.append('created_at', 'lte.' + filters.endDate + 'T23:59:59.999Z');
 
-  const expenses = await supabaseShoppingRequest(shoppingTables.expenses + '?' + params.toString());
+  let expenses;
+  try {
+    expenses = await supabaseShoppingRequest(shoppingTables.expenses + '?' + params.toString());
+  } catch (error) {
+    params.set('select', 'id,tempat_belanja,status,foto_url,foto_file_id,created_at,updated_at');
+    expenses = await supabaseShoppingRequest(shoppingTables.expenses + '?' + params.toString());
+  }
   const ids = (expenses || []).map(function(row) { return row.id; });
   const details = await loadShoppingDetails(ids);
   return composeShoppingTransactions(expenses || [], details.itemRows, details.operationalRows);
@@ -650,28 +718,40 @@ async function fetchShoppingTransactions(filters) {
 async function saveShoppingTransaction(data, existingId) {
   const id = existingId || genShoppingId();
   const now = new Date().toISOString();
+  const userName = data.user_name || getCurrentShoppingUserName();
   const expense = {
     id: id,
     tempat_belanja: data.tempat_belanja || '',
     status: data.status || 'draft',
     foto_url: data.foto_url || '',
     foto_file_id: data.foto_file_id || '',
+    user_name: userName,
     updated_at: now
   };
 
-  if (existingId) {
-    await supabaseShoppingRequest(shoppingTables.expenses + '?id=eq.' + encodeFilter(id), {
-      method: 'PATCH',
-      headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify(expense)
-    });
-  } else {
-    expense.created_at = now;
-    await supabaseShoppingRequest(shoppingTables.expenses, {
-      method: 'POST',
-      headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify(expense)
-    });
+  async function saveExpenseRow(row) {
+    if (existingId) {
+      await supabaseShoppingRequest(shoppingTables.expenses + '?id=eq.' + encodeFilter(id), {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify(row)
+      });
+    } else {
+      row.created_at = now;
+      await supabaseShoppingRequest(shoppingTables.expenses, {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify(row)
+      });
+    }
+  }
+
+  try {
+    await saveExpenseRow(expense);
+  } catch (error) {
+    const fallbackExpense = { ...expense };
+    delete fallbackExpense.user_name;
+    await saveExpenseRow(fallbackExpense);
   }
 
   await supabaseShoppingRequest(shoppingTables.items + '?expense_id=eq.' + encodeFilter(id), {
@@ -1389,7 +1469,8 @@ if (status === 'submitted' && !currentPhoto) {
   operasional: JSON.stringify(operasional),     // 🆕 kolom H
   foto_url: currentPhoto || '',
   foto_file_id: currentPhotoFileId || '',
-  status: status
+  status: status,
+  user_name: getCurrentShoppingUserName()
 };
 
 
@@ -1509,7 +1590,8 @@ function highlight(text, keyword) {
 fetchShoppingTransactions({ status: 'submitted', startDate: startDate, endDate: endDate })
 .then(data => {
   allPeriodTransactions = data;
-  adminSuggestions = buildAdminSuggestions(data);
+  populateReportUserSelector();
+  adminSuggestions = buildAdminSuggestions(getUserFilteredTransactions());
   currentInsightDetail = null;
 
   currentSearchKeyword = '';
@@ -1517,7 +1599,7 @@ fetchShoppingTransactions({ status: 'submitted', startDate: startDate, endDate: 
   adminSuggestBox.classList.add('hidden');
   clearBtn.classList.add('hidden');
 
-  renderReport(data);
+  filterTransactions('');
 })
  .catch(error => {
     showToast('Error loading report: ' + error, 'error');
@@ -1655,15 +1737,23 @@ function handleAdminSearch(raw) {
 
 
 // ⭐ FUNCTION UNTUK FILTER BERDASARKAN SEARCH
+function getUserFilteredTransactions() {
+  if (!selectedReportUser || selectedReportUser === 'all') return allPeriodTransactions;
+  return allPeriodTransactions.filter(function(transaction) {
+    return transaction.user_name === selectedReportUser;
+  });
+}
+
 function filterTransactions(keyword) {
   currentSearchKeyword = (keyword || '').toLowerCase().trim();
+  const userFilteredTransactions = getUserFilteredTransactions();
 
   if (!currentSearchKeyword) {
-    renderReport(allPeriodTransactions);
+    renderReport(userFilteredTransactions);
     return;
   }
 
-  const filtered = allPeriodTransactions.filter(function (transaction) {
+  const filtered = userFilteredTransactions.filter(function (transaction) {
     const tempat =
       typeof transaction.tempat_belanja === 'string'
         ? transaction.tempat_belanja.toLowerCase()
@@ -2097,7 +2187,8 @@ if (isPlaceMatch(t)) {
         periodLabel = startObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) + ' - ' + endObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
       }
 
-      document.getElementById('periodLabel').textContent = periodLabel;
+      const userLabel = selectedReportUser && selectedReportUser !== 'all' ? ' · ' + selectedReportUser : '';
+      document.getElementById('periodLabel').textContent = periodLabel + userLabel;
       document.getElementById('periodTotalAmount').textContent = 'Rp ' + totalAmount.toLocaleString('id-ID');
      
 
@@ -2123,7 +2214,7 @@ if (operasionalAmountEl && operasionalCountEl) {
       renderShoppingInsights(periodTransactions, totalAmount);
 
       if (currentSearchKeyword) {
-  document.getElementById('periodLabel').textContent = periodLabel + ' (Hasil pencarian: "' + currentSearchKeyword + '")';
+  document.getElementById('periodLabel').textContent = periodLabel + userLabel + ' (Hasil pencarian: "' + currentSearchKeyword + '")';
 }
 
       renderTransactions(periodTransactions);
@@ -2535,6 +2626,15 @@ document.getElementById('addOperasionalButton')
         loadPeriodReport();
       });
 
+      if (reportUserSelector) {
+        reportUserSelector.addEventListener('change', function() {
+          selectedReportUser = this.value || 'all';
+          adminSuggestions = buildAdminSuggestions(getUserFilteredTransactions());
+          currentInsightDetail = null;
+          filterTransactions(currentSearchKeyword);
+        });
+      }
+
       document.getElementById('shoppingInsights').addEventListener('click', function(e) {
         const detailBtn = e.target.closest('[data-insight-detail]');
         if (detailBtn) {
@@ -2634,8 +2734,9 @@ function selectBarang(val) {
      * INITIALIZE APP
      * ============================================
      */
-    (function init() {
+(function init() {
   initEventListeners();
+  populateReportUserSelector();
   preloadSuggestions();
 
   // 🔥 PRELOAD DRAFT DI BACKGROUND
@@ -2756,7 +2857,8 @@ ctx.drawImage(
       operasional: JSON.stringify(operasional || []),
       foto_url: currentPhoto,
       foto_file_id: currentPhotoFileId,
-      status: 'draft'
+      status: 'draft',
+      user_name: getCurrentShoppingUserName()
     }, currentDraftId)
     .then(res => {
 
