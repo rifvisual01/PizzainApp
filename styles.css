@@ -1,4 +1,4 @@
-html, body { height: 100%; margin: 0; }
+html, body { height: 100%; margin: 0; scroll-behavior: smooth; }
 * { font-family: 'Plus Jakarta Sans', sans-serif; }
 .app-page-title,
 .app-main h1,
@@ -23,6 +23,24 @@ html, body { height: 100%; margin: 0; }
     radial-gradient(circle at 80% 0%, rgba(248,113,113,0.28), transparent 32rem),
     radial-gradient(circle at 0% 100%, rgba(251,146,60,0.18), transparent 26rem),
     linear-gradient(135deg, #fff1f2 0%, #ffffff 42%, #fee2e2 100%) !important;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+#app:has(.login-screen) {
+  overflow: hidden;
+}
+.login-screen::-webkit-scrollbar {
+  display: none;
+}
+.login-users-list {
+  scroll-margin-block: 1rem;
+}
+.login-user-card {
+  border-radius: 1.5rem;
 }
 .login-card::before {
   content: "";
@@ -33,6 +51,35 @@ html, body { height: 100%; margin: 0; }
   background: rgba(255,255,255,0.54);
   box-shadow: 0 28px 70px rgba(127,29,29,0.12);
   backdrop-filter: blur(10px);
+}
+@media (max-height: 760px) {
+  .login-screen {
+    padding-top: 0.875rem !important;
+    padding-bottom: 0.875rem !important;
+  }
+  .login-app-icon {
+    width: 5rem !important;
+    height: 5rem !important;
+  }
+  #login-title {
+    font-size: 2.25rem !important;
+    line-height: 1.05 !important;
+  }
+  #login-company {
+    font-size: 1rem !important;
+  }
+  .login-card::before {
+    inset: -0.75rem;
+    border-radius: 1.75rem;
+  }
+  .login-user-card {
+    padding-top: 0.75rem !important;
+    padding-bottom: 0.75rem !important;
+  }
+  .login-user-avatar {
+    width: 2.75rem !important;
+    height: 2.75rem !important;
+  }
 }
 .fade-in { animation: none; }
 @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
