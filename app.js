@@ -1577,10 +1577,9 @@ function renderTransaction(cfg) {
     </div>
     <!-- Type Toggle -->
     <div class="flex gap-2">
-      ${isAdmin ? `
       <button id="btn-tx-in" data-tx-type="IN" class="flex-1 sm:flex-none px-6 py-3 rounded-xl text-sm font-600 flex items-center justify-center gap-2 btn-primary transition ${txType==='IN'?'bg-emerald-600 text-white shadow-lg':'bg-white border border-gray-200 text-gray-600 hover:border-emerald-300'}">
         <i data-lucide="arrow-down" style="width:16px;height:16px"></i>Stok Masuk (IN)
-      </button>` : ''}
+      </button>
       <button id="btn-tx-out" data-tx-type="OUT" class="flex-1 sm:flex-none px-6 py-3 rounded-xl text-sm font-600 flex items-center justify-center gap-2 btn-primary transition ${txType==='OUT'?'bg-red-600 text-white shadow-lg':'bg-white border border-gray-200 text-gray-600 hover:border-red-300'}">
         <i data-lucide="arrow-up" style="width:16px;height:16px"></i>Stok Keluar (OUT)
       </button>
