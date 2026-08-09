@@ -132,8 +132,8 @@
       </div>
       <h2 class="text-2xl font-bold text-gray-800 mb-2">Akses Admin</h2>
       <p class="text-gray-600">Masukkan PIN untuk melanjutkan</p>
-     </div><input type="password" id="pinInput" class="w-full px-4 py-4 text-center text-2xl font-bold border-2 border-gray-300 rounded-lg focus:border-red-500 focus:outline-none mb-2" placeholder="••••" maxlength="4">
-     <p id="pinError" class="hidden text-red-600 text-sm mb-4 text-center">❌ PIN salah! Coba lagi.</p>
+     </div><input type="password" id="pinInput" class="w-full px-4 py-4 text-center text-2xl font-bold border-2 border-gray-300 rounded-lg focus:border-red-500 focus:outline-none mb-2" placeholder="PIN" maxlength="4">
+     <p id="pinError" class="hidden text-red-600 text-sm mb-4 text-center">PIN salah! Coba lagi.</p>
      <div class="grid grid-cols-2 gap-3"><button id="btnCancelPin" class="py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors"> Batal </button> <button id="btnSubmitPin"
   class="py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors flex items-center justify-center gap-2">
   
@@ -487,7 +487,7 @@
     // Variabel Global
     // Variabel Global
 let items = [];          // BAHAN BAKU (lama, jangan dihapus)
-let operasional = [];    // 🆕 OPERASIONAL
+let operasional = [];    // OPERASIONAL
 let currentPhoto = null;
     let currentPhotoFileId = null;
     let allData = [];
@@ -942,7 +942,7 @@ function navigate(page, push = true) {
 
 window.addEventListener('popstate', function (event) {
   const page = event.state?.page || 'home';
-  navigate(page, false); // ⛔ JANGAN pushState lagi
+  navigate(page, false); // JANGAN pushState lagi
 });
 
     /**
@@ -968,7 +968,7 @@ window.addEventListener('popstate', function (event) {
 
   if (!enteredPin) return;
 
-  setAdminLoading(true); // 🔥 START ANIMASI
+  setAdminLoading(true); // START ANIMASI
 
   const fd = new FormData();
   fd.append('action', 'verifyAdminPin');
@@ -980,7 +980,7 @@ window.addEventListener('popstate', function (event) {
   })
     .then(res => res.json())
     .then(result => {
-      setAdminLoading(false); // 🔥 STOP ANIMASI
+      setAdminLoading(false); // STOP ANIMASI
 
       if (result.success) {
         hidePinPopup();
@@ -993,7 +993,7 @@ window.addEventListener('popstate', function (event) {
       }
     })
     .catch(error => {
-      setAdminLoading(false); // 🔥 PASTI BERHENTI
+      setAdminLoading(false); // PASTI BERHENTI
       showToast('Error: ' + error, 'error');
     });
 }
@@ -1187,7 +1187,7 @@ if (draft.status !== 'draft') {
   }
 
   // =====================
-  // 🔥 OPERASIONAL (INI FIX-NYA)
+  // OPERASIONAL (INI FIX-NYA)
   // =====================
   try {
     operasional = draft.operasional
@@ -1273,12 +1273,12 @@ function renderList(arr, listId, containerId) {
           class="text-red-500 hover:text-red-700 text-lg font-bold"
           aria-label="Hapus item"
         >
-          ×
+          &times;
         </button>
       </div>
     `;
 
-    // 🔥 EVENT HAPUS
+    // EVENT HAPUS
     row.querySelector('button').addEventListener('click', () => {
       arr.splice(i, 1);
       renderList(arr, listId, containerId);
@@ -1313,8 +1313,8 @@ function renderList(arr, listId, containerId) {
         const itemDiv = document.createElement('div');
         itemDiv.className = 'flex items-center justify-between p-3 bg-gray-50 rounded-lg';
         itemDiv.innerHTML = `
-          <span class="text-gray-800">${index + 1}. ${item[0]} (${item[1]}x) — Rp ${item[2].toLocaleString('id-ID')} = <strong>Rp ${item[3].toLocaleString('id-ID')}</strong></span>
-          <button class="text-red-500 hover:text-red-700 font-bold text-lg" data-index="${index}" aria-label="Hapus item">×</button>
+          <span class="text-gray-800">${index + 1}. ${item[0]} (${item[1]}x) - Rp ${item[2].toLocaleString('id-ID')} = <strong>Rp ${item[3].toLocaleString('id-ID')}</strong></span>
+          <button class="text-red-500 hover:text-red-700 font-bold text-lg" data-index="${index}" aria-label="Hapus item">&times;</button>
         `;
         
         itemDiv.querySelector('button').addEventListener('click', function(e) {
@@ -1386,7 +1386,7 @@ if (status === 'submitted' && !currentPhoto) {
       const data = {
   tempat_belanja: tempatBelanja,
   items: JSON.stringify(items),                 // bahan baku
-  operasional: JSON.stringify(operasional),     // 🆕 kolom H
+  operasional: JSON.stringify(operasional),     // kolom H
   foto_url: currentPhoto || '',
   foto_file_id: currentPhotoFileId || '',
   status: status
@@ -1439,7 +1439,7 @@ function resetForm() {
   document.getElementById('hargaBarang').value = '';
   document.getElementById('jumlahBarang').value = '1';
 
-  // 🔥 RESET DATA
+  // RESET DATA
   items = [];
   operasional = [];
 
@@ -1447,13 +1447,13 @@ function resetForm() {
   currentPhotoFileId = null;
   currentDraftId = null;
 
-  // 🔥 RESET PREVIEW LIST
+  // RESET PREVIEW LIST
   document.getElementById('itemList').innerHTML = '';
   document.getElementById('operasionalList').innerHTML = '';
   document.getElementById('itemListContainer').classList.add('hidden');
   document.getElementById('operasionalListContainer').classList.add('hidden');
 
-  // 🔥 RESET FOTO
+  // RESET FOTO
   const box = document.getElementById('photoPreview');
   if (box) {
     box.innerHTML = '';
@@ -1485,7 +1485,7 @@ function highlight(text, keyword) {
     /**
      * ============================================
      * ADMIN - LAPORAN
-     * ⭐ PERUBAHAN: Format daily card dengan red design
+     * PERUBAHAN: Format daily card dengan red design
      * ============================================
      */
     function loadPeriodReport() {
@@ -1523,7 +1523,7 @@ fetchShoppingTransactions({ status: 'submitted', startDate: startDate, endDate: 
     showToast('Error loading report: ' + error, 'error');
   })
   .finally(() => {
-    setLoadReportLoading(false); // ⬅️ TAMBAH
+    setLoadReportLoading(false); // TAMBAH
   });
 }
 
@@ -1554,7 +1554,7 @@ function buildAdminSuggestions(transactions) {
       } catch (e) {}
     }
 
-    // 🔥 OPERASIONAL (BARU)
+    // OPERASIONAL (BARU)
     if (t.operasional) {
       try {
         const ops = JSON.parse(t.operasional);
@@ -1602,7 +1602,7 @@ function setLoadReportLoading(isLoading) {
 function handleAdminSearch(raw) {
   const keyword = raw.trim().toLowerCase();
 
-  // KOSONG → reset
+  // KOSONG -> reset
   if (!keyword) {
     adminSuggestBox.classList.add('hidden');
     clearBtn.classList.add('hidden');
@@ -1614,7 +1614,7 @@ function handleAdminSearch(raw) {
   clearBtn.classList.remove('hidden');
   currentInsightDetail = null;
 
-  // 🔥 PENTING: FILTER LANGSUNG JALAN (FUZZY SEARCH)
+  // PENTING: FILTER LANGSUNG JALAN (FUZZY SEARCH)
   filterTransactions(keyword);
 
   // =========================
@@ -1654,7 +1654,7 @@ function handleAdminSearch(raw) {
 
 
 
-// ⭐ FUNCTION UNTUK FILTER BERDASARKAN SEARCH
+// FUNCTION UNTUK FILTER BERDASARKAN SEARCH
 function filterTransactions(keyword) {
   currentSearchKeyword = (keyword || '').toLowerCase().trim();
 
@@ -1750,7 +1750,7 @@ function renderInsightList(rows, emptyText, valueRenderer, options) {
     return `<div class="flex items-center justify-between gap-3 rounded-xl ${idx % 2 === 0 ? 'bg-red-50' : 'bg-white border border-gray-100'} px-3 py-2">
       <div class="min-w-0">
         <p class="text-sm font-bold text-gray-800 truncate">${row.name}</p>
-        <p class="text-xs text-gray-500">${row.count || 0}x transaksi · ${Number(row.qty || 0).toLocaleString('id-ID')} qty</p>
+        <p class="text-xs text-gray-500">${row.count || 0}x transaksi &middot; ${Number(row.qty || 0).toLocaleString('id-ID')} qty</p>
       </div>
       <div class="text-right shrink-0">
         ${valueRenderer(row)}
@@ -1768,8 +1768,8 @@ function renderInsightDetailRows(rows, type) {
 
   return `<div class="space-y-2">${rows.map(function(row, idx) {
     const meta = type === 'place'
-      ? `${row.count || 0} transaksi · ${Number(row.qty || 0).toLocaleString('id-ID')} item`
-      : `${row.count || 0}x transaksi · ${Number(row.qty || 0).toLocaleString('id-ID')} qty`;
+      ? `${row.count || 0} transaksi &middot; ${Number(row.qty || 0).toLocaleString('id-ID')} item`
+      : `${row.count || 0}x transaksi &middot; ${Number(row.qty || 0).toLocaleString('id-ID')} qty`;
     const side = type === 'frequency'
       ? `<p class="text-sm font-bold text-gray-800">${row.count || 0}x</p><p class="text-xs font-bold text-red-600">${formatRupiah(row.total)}</p>`
       : `<p class="text-sm font-bold text-red-600">${formatRupiah(row.total)}</p>`;
@@ -1993,7 +1993,7 @@ function renderShoppingInsights(transactions, totalAmount) {
             return `<div class="${idx % 2 === 0 ? 'bg-red-50' : 'bg-white border border-gray-100'} rounded-xl px-3 py-2 flex items-center justify-between gap-3">
               <div class="min-w-0">
                 <p class="text-sm font-bold text-gray-800 truncate">${row.name}</p>
-                <p class="text-xs text-gray-500">Min ${formatRupiah(row.min)} · Max ${formatRupiah(row.max)}</p>
+                <p class="text-xs text-gray-500">Min ${formatRupiah(row.min)} &middot; Max ${formatRupiah(row.max)}</p>
               </div>
               <div class="text-right shrink-0">
                 <p class="text-sm font-bold ${naik ? 'text-red-600' : 'text-emerald-600'}">${naik ? '+' : ''}${formatRupiah(row.diff)}</p>
@@ -2035,7 +2035,7 @@ function itemMatch(name) {
 const operasional = t.operasional ? JSON.parse(t.operasional) : [];
 
        bahan.forEach(item => {
-  // MODE TEMPAT → hitung semua
+  // MODE TEMPAT -> hitung semua
   if (isPlaceMatch(t)) {
     totalBahan += item[3];
     countBahan++;
@@ -2050,7 +2050,7 @@ const operasional = t.operasional ? JSON.parse(t.operasional) : [];
 });
 
 operasional.forEach(item => {
-  // MODE TEMPAT → hitung semua
+  // MODE TEMPAT -> hitung semua
   if (isPlaceMatch(t)) {
     totalOperasional += item[3];
     countOperasional++;
@@ -2067,11 +2067,11 @@ operasional.forEach(item => {
 
 
 if (isPlaceMatch(t)) {
-  // 🔵 MODE TEMPAT → hitung SEMUA
+  // MODE TEMPAT -> hitung SEMUA
   bahan.forEach(item => totalAmount += item[3]);
   operasional.forEach(item => totalAmount += item[3]);
 } else {
-  // 🟢 MODE ITEM → logika lama (TIDAK DIUBAH)
+  // MODE ITEM -> logika lama (TIDAK DIUBAH)
   bahan.forEach(item => {
     if (itemMatch(item[0])) {
       totalAmount += item[3];
@@ -2130,7 +2130,7 @@ if (operasionalAmountEl && operasionalCountEl) {
     }
 
     /**
-     * ⭐ PERUBAHAN UTAMA: Render daily cards dengan design red card
+     * PERUBAHAN UTAMA: Render daily cards dengan design red card
      */
     function renderTransactions(transactions) {
  document.getElementById('periodTotalTransactions').textContent =
@@ -2196,7 +2196,7 @@ dailyTransactions.forEach(function(t) {
 });
 
 
-          // ⭐ HITUNG JUMLAH TEMPAT BELANJA UNIK
+          // HITUNG JUMLAH TEMPAT BELANJA UNIK
           const uniquePlaces = new Set();
           dailyTransactions.forEach(function(t) {
             uniquePlaces.add(t.tempat_belanja);
@@ -2214,7 +2214,7 @@ dayCard.className = `
 
 
           
-          // ⭐ DESIGN RED CARD UNTUK DAILY SUMMARY
+          // DESIGN RED CARD UNTUK DAILY SUMMARY
           dayCard.innerHTML = `
   <div class="px-3 py-2 text-white">
     <div class="flex items-center justify-between gap-3">
@@ -2306,7 +2306,7 @@ operasional.forEach(item => {
                     <p class="font-bold text-gray-800 text-sm">${transaction.tempat_belanja}</p>
                   </div>
                   <div class="flex items-center gap-2 text-xs text-gray-500 ml-6">
-                    <span>⏰ ${waktu}</span>
+                    <span>Jam ${waktu}</span>
                   </div>
                 </div>
                 <div class="text-right">
@@ -2320,10 +2320,10 @@ operasional.forEach(item => {
               <div class="hidden transaction-detail-section mt-2 pt-2 border-t border-gray-200">
                <p class="text-xs font-semibold text-gray-700 mb-1">Bahan Baku:</p>
 ${bahan.length === 0
-  ? '<div class="text-xs text-gray-400 ml-2 mb-1">– Tidak ada</div>'
+  ? '<div class="text-xs text-gray-400 ml-2 mb-1">- Tidak ada</div>'
   : bahan.map(item => `
       <div class="flex justify-between text-xs text-gray-600 mb-1 ml-2">
-        <span>• ${item[0]} (${item[1]}x @ Rp ${item[2].toLocaleString('id-ID')})</span>
+        <span>- ${item[0]} (${item[1]}x @ Rp ${item[2].toLocaleString('id-ID')})</span>
         <span class="font-semibold">Rp ${item[3].toLocaleString('id-ID')}</span>
       </div>
     `).join('')
@@ -2331,10 +2331,10 @@ ${bahan.length === 0
 
 <p class="text-xs font-semibold text-gray-700 mt-2 mb-1">Operasional:</p>
 ${operasional.length === 0
-  ? '<div class="text-xs text-gray-400 ml-2">– Tidak ada</div>'
+  ? '<div class="text-xs text-gray-400 ml-2">- Tidak ada</div>'
   : operasional.map(item => `
       <div class="flex justify-between text-xs text-gray-600 mb-1 ml-2">
-        <span>• ${item[0]} (${item[1]}x @ Rp ${item[2].toLocaleString('id-ID')})</span>
+        <span>- ${item[0]} (${item[1]}x @ Rp ${item[2].toLocaleString('id-ID')})</span>
         <span class="font-semibold">Rp ${item[3].toLocaleString('id-ID')}</span>
       </div>
     `).join('')
@@ -2405,8 +2405,8 @@ operasional.forEach(item => transactionTotal += item[3]);
 </p>
                 </div>
                 <div class="flex items-center gap-3 text-sm text-gray-500 ml-7">
-                  <span>📅 ${tanggal}</span>
-                  <span>⏰ ${waktu}</span>
+                  <span>Tanggal ${tanggal}</span>
+                  <span>Jam ${waktu}</span>
                 </div>
               </div>
               <div class="text-right">
@@ -2423,10 +2423,10 @@ operasional.forEach(item => transactionTotal += item[3]);
 </div>
 
 ${bahan.length === 0
-  ? '<div class="text-xs text-gray-400 mb-2 ml-2">– Tidak ada</div>'
+  ? '<div class="text-xs text-gray-400 mb-2 ml-2">- Tidak ada</div>'
   : bahan.map(item => `
       <div class="flex justify-between text-sm text-gray-600 mb-1 ml-2">
-        <span>• ${item[0]} (${item[1]}x @ Rp ${item[2].toLocaleString('id-ID')})</span>
+        <span>- ${item[0]} (${item[1]}x @ Rp ${item[2].toLocaleString('id-ID')})</span>
         <span class="font-semibold">
           Rp ${item[3].toLocaleString('id-ID')}
         </span>
@@ -2439,10 +2439,10 @@ ${bahan.length === 0
 </div>
 
 ${operasional.length === 0
-  ? '<div class="text-xs text-gray-400 mb-1 ml-2">– Tidak ada</div>'
+  ? '<div class="text-xs text-gray-400 mb-1 ml-2">- Tidak ada</div>'
   : operasional.map(item => `
       <div class="flex justify-between text-sm text-gray-600 mb-1 ml-2">
-        <span>• ${item[0]} (${item[1]}x @ Rp ${item[2].toLocaleString('id-ID')})</span>
+        <span>- ${item[0]} (${item[1]}x @ Rp ${item[2].toLocaleString('id-ID')})</span>
         <span class="font-semibold">
           Rp ${item[3].toLocaleString('id-ID')}
         </span>
@@ -2638,7 +2638,7 @@ function selectBarang(val) {
   initEventListeners();
   preloadSuggestions();
 
-  // 🔥 PRELOAD DRAFT DI BACKGROUND
+  // PRELOAD DRAFT DI BACKGROUND
   loadAllDrafts();
 
   const hash = location.hash.replace('#', '');
@@ -2689,7 +2689,7 @@ async function captureFromCamera() {
 
   const canvas = document.createElement('canvas');
 
-// 🔥 ukuran SESUAI BOX VIDEO YANG TERLIHAT
+// ukuran SESUAI BOX VIDEO YANG TERLIHAT
 const width = video.clientWidth;
 const height = video.clientHeight;
 
@@ -2698,7 +2698,7 @@ canvas.height = height;
 
 const ctx = canvas.getContext('2d');
 
-// 🔥 gambar PERSIS seperti yang terlihat (TANPA CROP TAMBAHAN)
+// gambar PERSIS seperti yang terlihat (TANPA CROP TAMBAHAN)
 const videoW = video.videoWidth;
 const videoH = video.videoHeight;
 
@@ -2721,7 +2721,7 @@ ctx.drawImage(
 
   const base64Data = canvas.toDataURL('image/jpeg', 0.9);
 
-  stopCamera(); // 🔒 matikan kamera
+  stopCamera(); // matikan kamera
 
   document.getElementById('uploadSpinner').classList.remove('hidden');
 
@@ -2745,7 +2745,7 @@ ctx.drawImage(
 
   showToast('Foto berhasil diambil', 'success');
 
-  // 🔥 AUTO SAVE FOTO KE DATABASE
+  // AUTO SAVE FOTO KE DATABASE
   const tempat = document.getElementById('tempatBelanja').value.trim();
 
   if (tempat) {
