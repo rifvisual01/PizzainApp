@@ -27,6 +27,7 @@
   let syncPromise = null;
   let client = null;
   let supportsTracksStock = true;
+  let supportsUserAllowedViews = true;
   let lastSyncStatus = {
     configured: isSupabaseReady,
     keyType: activeSupabaseKey?.startsWith('sb_publishable_') ? 'publishable' : 'anon',
@@ -143,7 +144,7 @@ function emitDataChanged(records) {
   }
 
   function toUserRow(record) {
-    return {
+    const row = {
       id: record.__backendId,
       name: record.name || '',
       pin: record.pin || '',
@@ -151,6 +152,8 @@ function emitDataChanged(records) {
       updated_at: record.updated_at || new Date().toISOString(),
       deleted_at: deletedAt(record)
     };
+    if (supportsUserAllowedViews) row.allowed_views = normalizeAllowedViews(record.allowed_views, record.role || 'staff');
+    return row;
   }
 
   function toItemRow(record) {
@@ -201,6 +204,7 @@ function emitDataChanged(records) {
       name: row.name,
       pin: row.pin,
       role: row.role,
+      allowed_views: row.allowed_views == null ? undefined : normalizeAllowedViews(row.allowed_views, row.role),
       updated_at: row.updated_at,
       _deleted: Boolean(row.deleted_at)
     };
@@ -262,6 +266,14 @@ function emitDataChanged(records) {
         .upsert(row, { onConflict: 'id' });
       error = retry.error;
     }
+    if (error && record.type === 'user' && isMissingColumnError(error, 'allowed_views')) {
+      supportsUserAllowedViews = false;
+      delete row.allowed_views;
+      const retry = await client
+        .from(table)
+        .upsert(row, { onConflict: 'id' });
+      error = retry.error;
+    }
 
     if (error) throw error;
   }
@@ -316,7 +328,14 @@ function emitDataChanged(records) {
 
   async function pullRemote() {
     if (!client || !navigator.onLine) return;
-    const usersRows = await fetchRemoteRows(tables.users, 'id,name,pin,role,updated_at,deleted_at');
+    let usersRows = [];
+    try {
+      usersRows = await fetchRemoteRows(tables.users, 'id,name,pin,role,allowed_views,updated_at,deleted_at');
+    } catch (error) {
+      if (!isMissingColumnError(error, 'allowed_views')) throw error;
+      supportsUserAllowedViews = false;
+      usersRows = await fetchRemoteRows(tables.users, 'id,name,pin,role,updated_at,deleted_at');
+    }
     let itemsRows = [];
     try {
       itemsRows = await fetchRemoteRows(tables.items, 'id,name,category,price,tracks_stock,stock,min_stock,updated_at,deleted_at');
@@ -341,6 +360,9 @@ function emitDataChanged(records) {
         await removeLocal(record.__backendId);
       } else {
         const local = await getLocal(record.__backendId);
+        if (record.type === 'user' && record.allowed_views == null) {
+          record.allowed_views = normalizeAllowedViews(local?.allowed_views, record.role);
+        }
         if (local?._deleted && new Date(local.updated_at) >= new Date(record.updated_at)) {
           continue;
         }
@@ -514,6 +536,8 @@ window.confirmMsg = '';
 window.confirmCallback = null;
 window.pinModal = { show:false, title:'', cb:null, error:'' };
 window.changePinModal = { show:false, userId:'', newPin:'', error:'' };
+window.accessModal = { show:false, userId:'', error:'' };
+window.shoppingDashboardSummary = { status:'idle', version:0, data:null, error:'' };
 
 // State tracking untuk prevent double binding
 let mobileMenuOverlayBound = false;
@@ -533,16 +557,59 @@ const defaultConfig = {
   font_size: 16
 };
 
+const STAFF_ACCESS_PAGES = [
+  { id:'dashboard', icon:'layout-dashboard', label:'Dashboard' },
+  { id:'items', icon:'package', label:'Barang' },
+  { id:'transaction', icon:'arrow-left-right', label:'Transaksi' },
+  { id:'history', icon:'history', label:'Riwayat' },
+  { id:'shopping', icon:'shopping-cart', label:'Input Belanja' },
+  { id:'draft-shopping', icon:'file-text', label:'Draf Belanja' },
+];
+const ADMIN_ONLY_VIEWS = ['reports', 'users', 'shopping-report'];
+const ADMIN_PAGES = [
+  { id:'shopping-report', icon:'clipboard-list', label:'Laporan Belanja' },
+  { id:'reports', icon:'bar-chart-3', label:'Laporan Barang' },
+  { id:'users', icon:'users', label:'Staff' },
+];
+const STAFF_DEFAULT_ALLOWED_VIEWS = STAFF_ACCESS_PAGES.map(page => page.id);
+
+function normalizeAllowedViews(value, role = 'staff') {
+  if (role === 'admin') return [...STAFF_DEFAULT_ALLOWED_VIEWS];
+  let raw = value;
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw);
+    } catch (_) {
+      raw = raw.split(',').map(part => part.trim()).filter(Boolean);
+    }
+  }
+  const allowed = Array.isArray(raw)
+    ? raw.filter(view => STAFF_DEFAULT_ALLOWED_VIEWS.includes(view))
+    : [];
+  return allowed.length > 0 ? [...new Set(allowed)] : [...STAFF_DEFAULT_ALLOWED_VIEWS];
+}
+
+function getAllowedViewsForUser(user) {
+  if (!user) return [];
+  if (user.role === 'admin') return [...STAFF_DEFAULT_ALLOWED_VIEWS, ...ADMIN_ONLY_VIEWS];
+  return normalizeAllowedViews(user.allowed_views, user.role);
+}
+
+function canUserAccessView(user, view) {
+  const knownViews = [...STAFF_DEFAULT_ALLOWED_VIEWS, ...ADMIN_ONLY_VIEWS];
+  if (!knownViews.includes(view)) return false;
+  if (user?.role === 'admin') return true;
+  if (ADMIN_ONLY_VIEWS.includes(view)) return false;
+  return getAllowedViewsForUser(user).includes(view);
+}
+
 function getDefaultViewForCurrentUser() {
-  return 'dashboard';
+  const allowed = getAllowedViewsForUser(window.currentUser);
+  return allowed.includes('dashboard') ? 'dashboard' : (allowed[0] || 'transaction');
 }
 
 function isValidViewForCurrentUser(view) {
-  const adminViews = ['reports', 'users', 'shopping-report'];
-  const knownViews = ['dashboard', 'items', 'transaction', 'history', 'shopping', 'draft-shopping', ...adminViews];
-  if (!knownViews.includes(view)) return false;
-  if (adminViews.includes(view) && window.currentUser?.role !== 'admin') return false;
-  return true;
+  return canUserAccessView(window.currentUser, view);
 }
 
 function syncBrowserHistory(view, mode = 'push') {
@@ -600,6 +667,8 @@ const dataHandler = {
       record.updated_at || '',
       record.stock ?? '',
       record.name || '',
+      record.role || '',
+      Array.isArray(record.allowed_views) ? record.allowed_views.join(',') : (record.allowed_views || ''),
       record._deleted ? 1 : 0
     ]));
 
@@ -607,6 +676,15 @@ const dataHandler = {
     lastDataSignature = nextSignature;
     dataRenderVersion++;
     window.allData = nextData;
+    if (window.currentUser?.__backendId) {
+      const refreshedUser = nextData.find(record => record.type === 'user' && record.__backendId === window.currentUser.__backendId);
+      if (refreshedUser) {
+        window.currentUser = refreshedUser;
+        if (!isValidViewForCurrentUser(window.currentView)) {
+          window.currentView = getDefaultViewForCurrentUser();
+        }
+      }
+    }
     render();
   }
 };
@@ -730,9 +808,247 @@ function formatDate(ts) {
   const d = new Date(ts);
   return d.toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}) + ' ' + d.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'});
 }
+function formatDateShort(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  return d.toLocaleDateString('id-ID',{day:'2-digit',month:'short'});
+}
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char]));
+}
 function getCategories() {
   const cats = new Set(getItems().map(i=>i.category).filter(Boolean));
   return [...cats].sort();
+}
+
+function getShoppingTables() {
+  const cfg = window.STOCK_APP_CONFIG || {};
+  return {
+    expenses: cfg.supabaseTables?.shoppingExpenses || 'shopping_expenses',
+    items: cfg.supabaseTables?.shoppingExpenseItems || 'shopping_expense_items',
+    operational: cfg.supabaseTables?.shoppingOperationalCosts || 'shopping_operational_costs'
+  };
+}
+
+function getShoppingClient() {
+  if (window.shoppingDashboardClient) return window.shoppingDashboardClient;
+  const cfg = window.STOCK_APP_CONFIG || {};
+  const key = cfg.supabasePublishableKey || cfg.supabaseAnonKey;
+  if (!cfg.supabaseUrl || !key || !window.supabase?.createClient) return null;
+  window.shoppingDashboardClient = window.supabase.createClient(cfg.supabaseUrl, key);
+  return window.shoppingDashboardClient;
+}
+
+function markShoppingSummaryState(patch) {
+  window.shoppingDashboardSummary = {
+    ...(window.shoppingDashboardSummary || { status:'idle', version:0, data:null, error:'' }),
+    ...patch,
+    version: (window.shoppingDashboardSummary?.version || 0) + 1
+  };
+}
+
+async function fetchShoppingLines(client, table, expenseIds) {
+  const ids = [...new Set(expenseIds || [])].filter(Boolean);
+  if (!ids.length) return [];
+  const rows = [];
+  for (let i = 0; i < ids.length; i += 80) {
+    const chunk = ids.slice(i, i + 80);
+    const { data, error } = await client
+      .from(table)
+      .select('expense_id,line_total')
+      .in('expense_id', chunk);
+    if (error) throw error;
+    rows.push(...(data || []));
+  }
+  return rows;
+}
+
+function addShoppingLineTotals(target, rows, key) {
+  (rows || []).forEach(row => {
+    const id = row.expense_id;
+    if (!id) return;
+    if (!target.has(id)) target.set(id, { items:0, operational:0 });
+    const total = Number(row.line_total) || 0;
+    target.get(id)[key] += total;
+  });
+}
+
+function getShoppingExpenseTotal(totalMap, id) {
+  const total = totalMap.get(id) || { items:0, operational:0 };
+  return (Number(total.items) || 0) + (Number(total.operational) || 0);
+}
+
+async function loadShoppingDashboardSummary(force = false) {
+  const current = window.shoppingDashboardSummary || { status:'idle' };
+  if (!force && current.status === 'loading') return;
+  const client = getShoppingClient();
+  if (!client) {
+    markShoppingSummaryState({ status:'error', error:'Koneksi Supabase belanja belum siap' });
+    lastRenderKey = '';
+    render();
+    return;
+  }
+
+  markShoppingSummaryState({ status:'loading', error:'' });
+
+  try {
+    const tables = getShoppingTables();
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const expenseSelect = 'id,tempat_belanja,status,created_at,updated_at';
+    const monthResult = await client
+      .from(tables.expenses)
+      .select(expenseSelect)
+      .eq('status', 'submitted')
+      .is('deleted_at', null)
+      .gte('created_at', monthStart.toISOString())
+      .lt('created_at', nextMonthStart.toISOString())
+      .order('created_at', { ascending:false })
+      .limit(1000);
+
+    if (monthResult.error) throw monthResult.error;
+
+    const monthExpenses = monthResult.data || [];
+    const allExpenseIds = monthExpenses.map(expense => expense.id).filter(Boolean);
+
+    const [itemRows, operationalRows] = await Promise.all([
+      fetchShoppingLines(client, tables.items, allExpenseIds),
+      fetchShoppingLines(client, tables.operational, allExpenseIds)
+    ]);
+
+    const totalMap = new Map();
+    allExpenseIds.forEach(id => totalMap.set(id, { items:0, operational:0 }));
+    addShoppingLineTotals(totalMap, itemRows, 'items');
+    addShoppingLineTotals(totalMap, operationalRows, 'operational');
+
+    const todayExpenses = monthExpenses.filter(expense => {
+      const createdAt = new Date(expense.created_at);
+      return createdAt >= todayStart && createdAt < tomorrowStart;
+    });
+    const todayIds = new Set(todayExpenses.map(expense => expense.id));
+    const todayTotal = todayExpenses.reduce((sum, expense) => sum + getShoppingExpenseTotal(totalMap, expense.id), 0);
+    const monthTotal = monthExpenses.reduce((sum, expense) => sum + getShoppingExpenseTotal(totalMap, expense.id), 0);
+    const todayItemsTotal = [...todayIds].reduce((sum, id) => sum + (Number(totalMap.get(id)?.items) || 0), 0);
+    const todayOperational = [...todayIds].reduce((sum, id) => sum + (Number(totalMap.get(id)?.operational) || 0), 0);
+    const todayPlaceCount = new Set(todayExpenses.map(expense => expense.tempat_belanja || 'Tanpa Tempat')).size;
+    const todayHistory = todayExpenses.slice(0, 4).map(expense => ({
+      place: expense.tempat_belanja || 'Tanpa Tempat',
+      total: getShoppingExpenseTotal(totalMap, expense.id)
+    }));
+
+    markShoppingSummaryState({
+      status:'ready',
+      error:'',
+      data:{
+        todayTotal,
+        todayCount: todayExpenses.length,
+        todayItemsTotal,
+        todayOperational,
+        todayPlaceCount,
+        todayHistory,
+        todayHistoryMoreCount: Math.max(todayExpenses.length - 4, 0),
+        monthTotal,
+        monthCount: monthExpenses.length,
+        updatedAt: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.warn('[SHOPPING DASHBOARD] Gagal memuat ringkasan belanja:', error?.message || error);
+    markShoppingSummaryState({ status:'error', error:error?.message || String(error) });
+  }
+
+  lastRenderKey = '';
+  render();
+}
+
+function ensureShoppingDashboardSummary() {
+  const state = window.shoppingDashboardSummary || { status:'idle' };
+  if (state.status === 'idle') {
+    loadShoppingDashboardSummary();
+  }
+}
+
+function renderShoppingDashboardSummary() {
+  ensureShoppingDashboardSummary();
+  const state = window.shoppingDashboardSummary || { status:'idle', data:null, error:'' };
+  const data = state.data || {};
+  const loading = state.status === 'idle' || state.status === 'loading';
+  const smallText = loading ? 'Memuat...' : (state.status === 'error' ? 'Data belum tersedia' : '');
+  const todayHistory = data.todayHistory || [];
+  const isAdmin = window.currentUser?.role === 'admin';
+  const shoppingTarget = canUserAccessView(window.currentUser, 'shopping-report') ? 'shopping-report' : 'shopping';
+
+  return `
+    <div class="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-red-50">
+        <div>
+          <div class="font-800 text-sm text-gray-800 flex items-center gap-2">
+            <i data-lucide="shopping-bag" style="width:15px;height:15px;color:#dc2626"></i>
+            Laporan Belanja
+          </div>
+          <div class="text-[11px] text-gray-500 mt-0.5">${isAdmin ? 'Pantauan belanja hari ini dan bulan ini' : 'Pantauan belanja hari ini'}</div>
+        </div>
+        <button data-nav="${shoppingTarget}" class="text-red-600 text-xs font-800 hover:underline">${isAdmin ? 'Detail' : 'Input'}</button>
+      </div>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 p-3">
+        <button data-nav="${shoppingTarget}" class="text-left rounded-xl bg-red-600 text-white px-3 py-2.5">
+          <div class="text-[11px] font-700 text-white/75">Belanja Hari Ini</div>
+          <div class="text-lg font-900 leading-tight mt-0.5">${loading ? '-' : formatCurrency(data.todayTotal)}</div>
+          <div class="text-[11px] text-white/75 mt-0.5">${loading ? smallText : `${data.todayCount || 0} nota`}</div>
+        </button>
+        <button data-nav="${shoppingTarget}" class="text-left rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2.5">
+          <div class="text-[11px] font-800 text-emerald-700">Bahan Baku Hari Ini</div>
+          <div class="text-lg font-900 text-gray-900 leading-tight mt-0.5">${loading ? '-' : formatCurrency(data.todayItemsTotal)}</div>
+          <div class="text-[11px] text-gray-500 mt-0.5">${loading ? smallText : 'pembelian bahan'}</div>
+        </button>
+        <button data-nav="${shoppingTarget}" class="text-left rounded-xl bg-orange-50 border border-orange-100 px-3 py-2.5">
+          <div class="text-[11px] font-800 text-orange-700">Operasional Hari Ini</div>
+          <div class="text-lg font-900 text-gray-900 leading-tight mt-0.5">${loading ? '-' : formatCurrency(data.todayOperational)}</div>
+          <div class="text-[11px] text-gray-500 mt-0.5">${loading ? smallText : 'biaya operasional'}</div>
+        </button>
+        ${isAdmin ? `
+        <button data-nav="${shoppingTarget}" class="text-left rounded-xl bg-rose-50 border border-rose-100 px-3 py-2.5">
+          <div class="text-[11px] font-800 text-rose-700">Belanja Bulan Ini</div>
+          <div class="text-lg font-900 text-gray-900 leading-tight mt-0.5">${loading ? '-' : formatCurrency(data.monthTotal)}</div>
+          <div class="text-[11px] text-gray-500 mt-0.5">${loading ? smallText : `${data.monthCount || 0} nota bulan ini`}</div>
+        </button>` : `
+        <button data-nav="${shoppingTarget}" class="text-left rounded-xl bg-rose-50 border border-rose-100 px-3 py-2.5">
+          <div class="text-[11px] font-800 text-rose-700">Transaksi/Tempat</div>
+          <div class="text-lg font-900 text-gray-900 leading-tight mt-0.5">${loading ? '-' : (data.todayCount || 0)}</div>
+          <div class="text-[11px] text-gray-500 mt-0.5">${loading ? smallText : `${data.todayPlaceCount || 0} tempat belanja`}</div>
+        </button>`}
+        <button data-nav="${shoppingTarget}" class="text-left rounded-xl bg-white border border-gray-200 px-3 py-2.5 col-span-2 lg:col-span-4">
+          <div class="flex items-center justify-between gap-2 mb-1.5">
+            <div class="text-[11px] font-800 text-gray-600">Riwayat Belanja Hari Ini</div>
+            <div class="text-[11px] font-800 text-red-600">${loading ? '' : `${data.todayCount || 0} nota`}</div>
+          </div>
+          ${loading ? `<div class="text-xs text-gray-500">${smallText}</div>` : todayHistory.length === 0 ? `
+            <div class="text-xs text-gray-400">Belum ada belanja hari ini</div>
+          ` : `
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1.5">
+              ${todayHistory.map(row => `
+                <div class="rounded-lg bg-red-50 border border-red-100 px-2.5 py-1.5 min-w-0">
+                  <div class="text-xs font-800 text-gray-800 truncate">${escapeHtml(row.place)}</div>
+                  <div class="text-[11px] font-800 text-red-600 mt-0.5">${formatCurrency(row.total)}</div>
+                </div>
+              `).join('')}
+              ${data.todayHistoryMoreCount ? `<div class="rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-1.5 text-xs font-800 text-gray-500 flex items-center">+${data.todayHistoryMoreCount} nota lagi</div>` : ''}
+            </div>
+          `}
+        </button>
+      </div>
+      ${state.status === 'error' ? `<div class="px-4 pb-3 text-[11px] text-red-600 font-700">Gagal memuat laporan belanja: ${escapeHtml(state.error)}</div>` : ''}
+    </div>`;
 }
 
 // -- Toast --
@@ -779,6 +1095,7 @@ function isBlockingModalOpen() {
     window.showItemForm ||
     window.pinModal?.show ||
     window.changePinModal?.show ||
+    window.accessModal?.show ||
     window.confirmMsg ||
     window.showTxCartDetail ||
     window.showStockModal ||
@@ -807,6 +1124,9 @@ function render() {
     confirmMsg: window.confirmMsg,
     pinShow: window.pinModal.show,
     changePinShow: window.changePinModal.show,
+    accessModalShow: window.accessModal.show,
+    accessModalUser: window.accessModal.userId,
+    accessModalError: window.accessModal.error,
     stockModal: window.showStockModal,
     topItems: window.showTopItemsModal,
     todayModal: window.dashboardTodayModal,
@@ -822,11 +1142,16 @@ function render() {
     reportSelectedUser: window.reportSelectedUser?.name || '',
     historyDateStart: window.historyDateStart,
     historyDateEnd: window.historyDateEnd,
+    shoppingSummaryVersion: window.shoppingDashboardSummary?.version || 0,
     dataVersion: dataRenderVersion,
   });
 
   if (renderKey === lastRenderKey) return;
   lastRenderKey = renderKey;
+
+  if (window.currentUser && !isValidViewForCurrentUser(window.currentView)) {
+    window.currentView = getDefaultViewForCurrentUser();
+  }
 
   if (!window.currentUser) {
     app.innerHTML = renderLogin(cfg);
@@ -992,6 +1317,20 @@ function renderCreateUserModal(cfg) {
           <label class="block text-sm font-600 text-gray-700 mb-1">PIN (4 digit)</label>
           <input id="cu-pin" type="password" maxlength="4" pattern="\\d{4}" class="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm tracking-widest" placeholder="PIN" required>
         </div>
+        ${!isFirst ? `
+        <div class="rounded-xl border border-red-100 bg-red-50/50 p-3">
+          <div class="text-sm font-800 text-gray-800 mb-1">Akses Halaman Staff</div>
+          <p class="text-xs text-gray-500 mb-3">Checklist ini dipakai jika role yang dipilih adalah Staff.</p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            ${STAFF_ACCESS_PAGES.map(page => `
+              <label class="flex items-center gap-2 rounded-lg bg-white border border-red-100 px-3 py-2 text-sm font-600 text-gray-700">
+                <input type="checkbox" data-access-view="${page.id}" class="w-4 h-4 accent-red-600" checked>
+                <i data-lucide="${page.icon}" style="width:15px;height:15px;color:#dc2626"></i>
+                <span>${page.label}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>` : ''}
         <div class="flex gap-3 pt-2">
           <button type="button" id="btn-cancel-cu" class="flex-1 py-2.5 rounded-xl border border-gray-300 text-sm font-600 text-gray-600 hover:bg-gray-50">Batal</button>
           <button type="submit" class="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-600 btn-primary hover:bg-red-700">Buat</button>
@@ -1016,6 +1355,42 @@ function renderChangePinModal() {
       <div class="flex gap-3">
         <button id="btn-change-pin-cancel" class="flex-1 py-2.5 rounded-xl border border-gray-300 text-sm font-600 text-gray-600 hover:bg-gray-50">Batal</button>
         <button id="btn-change-pin-submit" class="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-600 btn-primary">Ubah</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderAccessModal() {
+  if (!window.accessModal.show) return '';
+  const user = getUsers().find(u => u.__backendId === window.accessModal.userId);
+  if (!user) return '';
+  const selected = getAllowedViewsForUser(user);
+  const isAdminUser = user.role === 'admin';
+  return `
+  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 fade-in">
+    <div class="modal-box bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+      <div class="flex items-start justify-between gap-3 mb-4">
+        <div>
+          <h3 class="font-800 text-lg text-gray-800">Akses Halaman Staff</h3>
+          <p class="text-gray-500 text-sm mt-1">${user.name} ${isAdminUser ? 'adalah Admin dan selalu punya akses penuh.' : 'hanya akan melihat halaman yang dicentang.'}</p>
+        </div>
+        <button id="btn-access-cancel" class="p-2 rounded-lg hover:bg-gray-100 text-gray-400">
+          <i data-lucide="x" style="width:18px;height:18px"></i>
+        </button>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        ${STAFF_ACCESS_PAGES.map(page => `
+          <label class="flex items-center gap-2 rounded-xl border ${selected.includes(page.id) ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'} px-3 py-2.5 text-sm font-600 text-gray-700 ${isAdminUser ? 'opacity-60' : ''}">
+            <input type="checkbox" data-user-access-view="${page.id}" class="w-4 h-4 accent-red-600" ${selected.includes(page.id) ? 'checked' : ''} ${isAdminUser ? 'disabled' : ''}>
+            <i data-lucide="${page.icon}" style="width:15px;height:15px;color:#dc2626"></i>
+            <span>${page.label}</span>
+          </label>
+        `).join('')}
+      </div>
+      ${window.accessModal.error ? `<p class="text-red-600 text-xs mt-3">${window.accessModal.error}</p>` : ''}
+      <div class="flex gap-3 mt-5">
+        <button id="btn-access-cancel-bottom" class="flex-1 py-2.5 rounded-xl border border-gray-300 text-sm font-600 text-gray-600 hover:bg-gray-50">Batal</button>
+        <button id="btn-access-save" ${isAdminUser ? 'disabled' : ''} class="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-600 btn-primary disabled:opacity-50 disabled:cursor-not-allowed">Simpan Akses</button>
       </div>
     </div>
   </div>`;
@@ -1046,22 +1421,13 @@ function renderMain(cfg) {
   const title = cfg.app_title || defaultConfig.app_title;
   const isAdmin = window.currentUser.role === 'admin';
   const isShoppingView = ['shopping', 'draft-shopping', 'shopping-report'].includes(window.currentView);
-  const menuItems = [
-    { id:'dashboard', icon:'layout-dashboard', label:'Dashboard' },
-    { id:'items', icon:'package', label:'Barang' },
-    { id:'transaction', icon:'arrow-left-right', label:'Transaksi' },
-    { id:'history', icon:'history', label:'Riwayat' },
-    { id:'shopping', icon:'shopping-cart', label:'Input Belanja' },
-    { id:'draft-shopping', icon:'file-text', label:'Draf Belanja' },
-  ];
+  const menuItems = [...STAFF_ACCESS_PAGES];
   if (isAdmin) {
-    menuItems.push({ id:'shopping-report', icon:'clipboard-list', label:'Laporan Belanja' });
-    menuItems.push({ id:'reports', icon:'bar-chart-3', label:'Laporan Barang' });
-    menuItems.push({ id:'users', icon:'users', label:'Staff' });
+    menuItems.push(...ADMIN_PAGES);
   }
 
   // Filter visible menu items
-  const visibleMenuItems = menuItems.filter(m => !m.adminOnly || isAdmin);
+  const visibleMenuItems = menuItems.filter(m => canUserAccessView(window.currentUser, m.id));
 
   return `
   <div class="app-shell h-full w-full flex flex-col" style="background:linear-gradient(135deg, ${cfg.background_color||defaultConfig.background_color} 0%, #fee2e2 100%)">
@@ -1133,6 +1499,7 @@ function renderMain(cfg) {
     ${window.showTopItemsModal ? renderTopItemsModal() : ''}
     ${renderCreateUserModal(cfg)}
     ${renderChangePinModal()}
+    ${renderAccessModal()}
   </div>`;
 }
 
@@ -1197,14 +1564,37 @@ function renderContent(cfg) {
 function renderDashboard(cfg) {
   const items = getItems();
   const txs = getAnalyticsTxs();
+  const isAdmin = window.currentUser?.role === 'admin';
   const stockItems = items.filter(itemUsesStock);
   const safe = stockItems.filter(i=>i.stock>i.min_stock).length;
   const low = stockItems.filter(i=>i.stock>0&&i.stock<=i.min_stock).length;
   const out = stockItems.filter(i=>i.stock<=0).length;
   const todayTxs = txs.filter(t=>{const d=new Date(t.timestamp);const n=new Date();return d.toDateString()===n.toDateString();});
-  const todayOut = todayTxs.filter(t=>t.tx_type==='OUT').reduce((s,t)=>s+(t.qty||0),0);
+  const todayOutTxs = todayTxs.filter(t=>t.tx_type==='OUT');
+  const todayOut = todayOutTxs.reduce((s,t)=>s+(t.qty||0),0);
   const todayIn = todayTxs.filter(t=>t.tx_type==='IN').reduce((s,t)=>s+(t.qty||0),0);
   const totalValue = stockItems.reduce((s,i)=>s+(i.price||0)*(i.stock||0),0);
+  const todayOutValue = todayOutTxs.reduce((s,t)=>s+getTxValue(t, items),0);
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const nextMonthStart = new Date(monthStart);
+  nextMonthStart.setMonth(nextMonthStart.getMonth() + 1);
+  const monthOutValue = txs
+    .filter(t => {
+      const d = new Date(t.timestamp);
+      return t.tx_type === 'OUT' && d >= monthStart && d < nextMonthStart;
+    })
+    .reduce((s,t)=>s+getTxValue(t, items),0);
+  const todayOutByStaff = new Map();
+  getUsers()
+    .filter(user => user.role !== 'admin')
+    .forEach(user => todayOutByStaff.set(user.name || 'Tanpa Nama', 0));
+  todayOutTxs.forEach(tx => {
+    const staffName = tx.user_name || 'Tanpa User';
+    todayOutByStaff.set(staffName, (todayOutByStaff.get(staffName) || 0) + (Number(tx.qty) || 0));
+  });
+  const todayOutStaffStats = [...todayOutByStaff.entries()].map(([name, qty]) => ({ name, qty }));
 
   const alertItemsAll = stockItems.filter(i=>i.stock<=i.min_stock).sort((a,b)=>(a.stock||0)-(b.stock||0));
   const alertItems = alertItemsAll.slice(0,5);
@@ -1273,29 +1663,72 @@ function renderDashboard(cfg) {
         <div class="text-xs text-white/80 font-500 mt-0.5">Habis</div>
       </button>
     </div>
-    <!-- Row 2 -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <div class="bg-red-600 rounded-2xl p-5 border border-red-700 text-white">
-        <button id="btn-dash-today" class="w-full text-left hover:opacity-90">
-          <div class="text-sm font-600 text-white/80 mb-1">Transaksi Hari Ini</div>
-          <div class="text-3xl font-800">${todayTxs.length}</div>
-          <div class="flex gap-4 mt-3">
-            <span class="text-xs font-600 text-white/90 flex items-center gap-1"><i data-lucide="arrow-down" style="width:12px;height:12px"></i>IN: ${todayIn}</span>
-            <span class="text-xs font-600 text-white/90 flex items-center gap-1"><i data-lucide="arrow-up" style="width:12px;height:12px"></i>OUT: ${todayOut}</span>
+    <!-- Daily Admin Summary -->
+    <div class="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-blue-50">
+        <div>
+          <div class="font-800 text-sm text-gray-800 flex items-center gap-2">
+            <i data-lucide="activity" style="width:15px;height:15px;color:#2563eb"></i>
+            Ringkasan Stok
+          </div>
+          <div class="text-[11px] text-gray-500 mt-0.5">${isAdmin ? 'Pantauan transaksi dan nilai stok hari ini' : 'Pantauan barang masuk dan keluar hari ini'}</div>
+        </div>
+        ${isAdmin ? `<button id="btn-dash-today-header" class="text-blue-600 text-xs font-800 hover:underline">Detail</button>` : ''}
+      </div>
+      <div class="grid grid-cols-2 ${isAdmin ? 'lg:grid-cols-5' : 'lg:grid-cols-2'} gap-2 p-3">
+        <button data-nav="history" class="text-left rounded-xl bg-blue-600 text-white px-3 py-2.5 ${isAdmin ? 'col-span-2 lg:col-span-1' : ''}">
+          <div class="text-[11px] font-700 text-white/75">Barang Keluar Hari Ini</div>
+          <div class="flex items-end gap-1.5 mt-0.5">
+            <div class="text-lg font-900 leading-tight">${todayOut}</div>
+            <div class="text-[11px] text-white/75 mb-0.5">item</div>
+          </div>
+          <div class="flex flex-wrap gap-1 mt-1.5">
+            ${todayOutStaffStats.length === 0 ? `
+              <span class="rounded-md bg-white/15 border border-white/20 px-2 py-0.5 text-[11px] text-white/75">Belum ada staff</span>
+            ` : todayOutStaffStats.slice(0, 4).map(stat => `
+              <span class="inline-flex items-center gap-1 rounded-md bg-white/15 border border-white/20 px-2 py-0.5 max-w-full">
+                <span class="text-[11px] text-white/80 font-700 truncate max-w-20">${escapeHtml(stat.name)}</span>
+                <span class="text-[11px] font-900">${stat.qty}</span>
+              </span>
+            `).join('')}
           </div>
         </button>
-      </div>
-      <div class="bg-white rounded-2xl p-5 border border-gray-200">
-        <div class="text-sm font-600 text-gray-500 mb-1">Nilai Stok</div>
-        <div class="text-2xl font-800 text-gray-800">${formatCurrency(totalValue)}</div>
-        <div class="text-xs text-gray-400 mt-2">Total nilai seluruh barang</div>
-      </div>
-      <div class="bg-orange-600 rounded-2xl p-5 border border-orange-700 text-white">
-        <div class="text-sm font-600 text-white/80 mb-1">Pengeluaran Hari Ini</div>
-        <div class="text-2xl font-800">${formatCurrency(todayTxs.filter(t=>t.tx_type==='OUT').reduce((s,t)=>s+getTxValue(t, items),0))}</div>
-        <div class="text-xs text-white/80 mt-2">Total nilai barang keluar</div>
+        ${!isAdmin ? `
+        <button data-nav="history" class="text-left rounded-xl bg-emerald-600 text-white px-3 py-2.5">
+          <div class="text-[11px] font-700 text-white/75">Barang Masuk Hari Ini</div>
+          <div class="flex items-end gap-1.5 mt-0.5">
+            <div class="text-lg font-900 leading-tight">${todayIn}</div>
+            <div class="text-[11px] text-white/75 mb-0.5">item</div>
+          </div>
+          <div class="text-[11px] text-white/75 mt-1.5">total stok masuk</div>
+        </button>` : ''}
+        ${isAdmin ? `
+        <button id="btn-dash-today" class="text-left rounded-xl bg-red-600 text-white px-3 py-2.5">
+          <div class="text-[11px] font-700 text-white/75">Transaksi Hari Ini</div>
+          <div class="text-lg font-900 leading-tight mt-0.5">${todayTxs.length}</div>
+          <div class="flex gap-2 mt-1 text-[11px] text-white/80 font-800">
+            <span>IN: ${todayIn}</span>
+            <span>OUT: ${todayOut}</span>
+          </div>
+        </button>
+        <div class="rounded-xl bg-white border border-gray-200 px-3 py-2.5">
+          <div class="text-[11px] font-800 text-gray-500">Nilai Stok</div>
+          <div class="text-lg font-900 text-gray-900 leading-tight mt-0.5">${formatCurrency(totalValue)}</div>
+          <div class="text-[11px] text-gray-500 mt-0.5">total nilai barang</div>
+        </div>
+        <div class="rounded-xl bg-orange-50 border border-orange-100 px-3 py-2.5">
+          <div class="text-[11px] font-800 text-orange-700">Pengeluaran Hari Ini</div>
+          <div class="text-lg font-900 text-gray-900 leading-tight mt-0.5">${formatCurrency(todayOutValue)}</div>
+          <div class="text-[11px] text-gray-500 mt-0.5">nilai barang keluar</div>
+        </div>
+        <div class="rounded-xl bg-rose-50 border border-rose-100 px-3 py-2.5">
+          <div class="text-[11px] font-800 text-rose-700">Pengeluaran Bulan Ini</div>
+          <div class="text-lg font-900 text-gray-900 leading-tight mt-0.5">${formatCurrency(monthOutValue)}</div>
+          <div class="text-[11px] text-gray-500 mt-0.5">gabungan semua staff</div>
+        </div>` : ''}
       </div>
     </div>
+    ${renderShoppingDashboardSummary()}
     <!-- Recent Transactions -->
     <div class="bg-white rounded-2xl border border-gray-100 overflow-hidden">
       <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between bg-red-600 text-white">
@@ -2024,7 +2457,42 @@ function renderReports(cfg) {
 // -- Users (Admin) --
 function renderUsers(cfg) {
   const users = getUsers();
-  return `<div class="fade-in space-y-4"><div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><h2 class="text-2xl font-800 text-gray-800">Manajemen Staff</h2><p class="text-gray-500 text-sm mt-0.5">${users.length} user terdaftar</p></div><button id="btn-add-user-page" class="px-5 py-2.5 bg-red-600 text-white rounded-xl text-sm font-600 btn-primary flex items-center gap-2 self-start"><i data-lucide="user-plus" style="width:16px;height:16px"></i>Tambah Staff</button></div><div class="grid gap-3">${users.map(u => {const userTxs = getDisplayTxs().filter(t=>t.user_name===u.name);return `<div class="bg-gradient-to-r from-red-50 to-white rounded-2xl border border-red-200 p-5 flex items-center gap-4 hover:shadow-md transition"><div class="w-12 h-12 rounded-full flex items-center justify-center text-lg font-800 ${u.role==='admin'?'bg-red-100 text-red-700':'bg-blue-100 text-blue-700'}">${(u.name||'?')[0].toUpperCase()}</div><div class="flex-1 min-w-0"><div class="font-700 text-gray-800">${u.name}</div><div class="flex items-center gap-3 mt-1"><span class="text-xs font-600 px-2 py-0.5 rounded-lg ${u.role==='admin'?'bg-red-100 text-red-700':'bg-blue-100 text-blue-700'}">${u.role==='admin'?'Admin':'Staff'}</span><span class="text-xs text-gray-400">${userTxs.length} transaksi</span>${u.__backendId===currentUser.__backendId?'<span class="text-xs text-gray-400">Login sekarang</span>':''}</div></div><div class="flex gap-2 shrink-0"><button data-change-pin="${u.__backendId}" class="p-2 rounded-lg hover:bg-blue-100 text-gray-400 hover:text-blue-600 transition" title="Ubah PIN"><i data-lucide="key" style="width:16px;height:16px"></i></button><button data-del-user="${u.__backendId}" class="p-2 rounded-lg hover:bg-red-100 text-gray-400 hover:text-red-600 transition" title="Hapus"><i data-lucide="trash-2" style="width:16px;height:16px"></i></button></div></div>`;}).join('')}</div></div>`;
+  return `<div class="fade-in space-y-4">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div>
+        <h2 class="text-2xl font-800 text-gray-800">Manajemen Staff</h2>
+        <p class="text-gray-500 text-sm mt-0.5">${users.length} user terdaftar</p>
+      </div>
+      <button id="btn-add-user-page" class="px-5 py-2.5 bg-red-600 text-white rounded-xl text-sm font-600 btn-primary flex items-center gap-2 self-start">
+        <i data-lucide="user-plus" style="width:16px;height:16px"></i>Tambah Staff
+      </button>
+    </div>
+    <div class="grid gap-3">${users.map(u => {
+      const userTxs = getDisplayTxs().filter(t=>t.user_name===u.name);
+      const accessLabels = u.role === 'admin'
+        ? ['Semua halaman']
+        : getAllowedViewsForUser(u).map(view => STAFF_ACCESS_PAGES.find(page => page.id === view)?.label).filter(Boolean);
+      return `<div class="bg-gradient-to-r from-red-50 to-white rounded-2xl border border-red-200 p-5 flex flex-col sm:flex-row sm:items-center gap-4 hover:shadow-md transition">
+        <div class="w-12 h-12 rounded-full flex items-center justify-center text-lg font-800 ${u.role==='admin'?'bg-red-100 text-red-700':'bg-blue-100 text-blue-700'}">${(u.name||'?')[0].toUpperCase()}</div>
+        <div class="flex-1 min-w-0">
+          <div class="font-700 text-gray-800">${u.name}</div>
+          <div class="flex items-center gap-3 mt-1 flex-wrap">
+            <span class="text-xs font-600 px-2 py-0.5 rounded-lg ${u.role==='admin'?'bg-red-100 text-red-700':'bg-blue-100 text-blue-700'}">${u.role==='admin'?'Admin':'Staff'}</span>
+            <span class="text-xs text-gray-400">${userTxs.length} transaksi</span>
+            ${u.__backendId===currentUser.__backendId?'<span class="text-xs text-gray-400">Login sekarang</span>':''}
+          </div>
+          <div class="flex flex-wrap gap-1.5 mt-3">
+            ${accessLabels.map(label => `<span class="text-[11px] font-700 px-2 py-1 rounded-lg bg-white border border-red-100 text-gray-600">${label}</span>`).join('')}
+          </div>
+        </div>
+        <div class="flex gap-2 shrink-0 self-end sm:self-center">
+          <button data-edit-access="${u.__backendId}" class="p-2 rounded-lg hover:bg-emerald-100 text-gray-400 hover:text-emerald-600 transition" title="Atur akses halaman"><i data-lucide="shield-check" style="width:16px;height:16px"></i></button>
+          <button data-change-pin="${u.__backendId}" class="p-2 rounded-lg hover:bg-blue-100 text-gray-400 hover:text-blue-600 transition" title="Ubah PIN"><i data-lucide="key" style="width:16px;height:16px"></i></button>
+          <button data-del-user="${u.__backendId}" class="p-2 rounded-lg hover:bg-red-100 text-gray-400 hover:text-red-600 transition" title="Hapus"><i data-lucide="trash-2" style="width:16px;height:16px"></i></button>
+        </div>
+      </div>`;
+    }).join('')}</div>
+  </div>`;
 }
 
 // -- Shopping/Draft (Placeholder) --
@@ -2240,7 +2708,7 @@ async function handleMainClick(e) {
       return;
     }
 
-    if (btn.id === 'btn-dash-today') {
+    if (btn.id === 'btn-dash-today' || btn.id === 'btn-dash-today-header') {
       const today = new Date().toISOString().slice(0, 10);
       window.historyDateStart = today;
       window.historyDateEnd = today;
@@ -2630,6 +3098,55 @@ async function handleMainClick(e) {
       return;
     }
 
+    if (btn.dataset.editAccess) {
+      const userId = btn.dataset.editAccess;
+      window.accessModal = { show: true, userId, error: '' };
+      render();
+      return;
+    }
+
+    if (btn.id === 'btn-access-cancel' || btn.id === 'btn-access-cancel-bottom') {
+      window.accessModal = { show: false, userId: '', error: '' };
+      render();
+      return;
+    }
+
+    if (btn.id === 'btn-access-save') {
+      const user = getUsers().find(u => u.__backendId === window.accessModal.userId);
+      if (!user) {
+        showToast('User tidak ditemukan', 'error');
+        return;
+      }
+      if (user.role === 'admin') {
+        window.accessModal = { show: false, userId: '', error: '' };
+        render();
+        return;
+      }
+      const allowed_views = Array.from(document.querySelectorAll('[data-user-access-view]:checked')).map(input => input.dataset.userAccessView);
+      if (allowed_views.length === 0) {
+        window.accessModal.error = 'Pilih minimal satu halaman untuk staff ini.';
+        render();
+        return;
+      }
+      const updated = { ...user, allowed_views: normalizeAllowedViews(allowed_views, user.role) };
+      const r = await window.stockStore.update(updated);
+      if (r.isOk) {
+        if (window.currentUser?.__backendId === updated.__backendId) {
+          window.currentUser = updated;
+          if (!isValidViewForCurrentUser(window.currentView)) window.currentView = getDefaultViewForCurrentUser();
+        }
+        const status = await window.stockStore.syncAfterWrite?.();
+        window.accessModal = { show: false, userId: '', error: '' };
+        showSyncResult(status, 'Akses staff diperbarui');
+        lastRenderKey = '';
+        render();
+      } else {
+        window.accessModal.error = 'Gagal menyimpan akses staff.';
+        render();
+      }
+      return;
+    }
+
     if (btn.id === 'btn-change-pin-cancel') {
       window.changePinModal = { show: false, userId: '', newPin: '', error: '' };
       render();
@@ -2663,11 +3180,22 @@ function bindFormHandlers() {
       const roleEl = document.getElementById('cu-role');
       const role = roleEl ? roleEl.value : 'admin';
       if (!name || pin.length !== 4 || !/^\d{4}$/.test(pin)) { showToast('Nama & PIN 4 digit wajib diisi', 'error'); return; }
+      const selectedAccess = Array.from(document.querySelectorAll('[data-access-view]:checked')).map(input => input.dataset.accessView);
+      if (role !== 'admin' && selectedAccess.length === 0) {
+        showToast('Pilih minimal satu halaman untuk staff', 'error');
+        return;
+      }
       const btn = formCU.querySelector('button[type=submit]');
       btn.disabled = true;
       const originalText = btn.textContent;
       btn.textContent = 'Menyimpan...';
-      const r = await window.stockStore.create({ type: 'user', name, pin, role });
+      const r = await window.stockStore.create({
+        type: 'user',
+        name,
+        pin,
+        role,
+        allowed_views: normalizeAllowedViews(selectedAccess, role)
+      });
       if (r.isOk) { window.showCreateUser = false; window.showMobileMenu = false; showToast('User berhasil dibuat'); lastRenderKey = ''; render(); }
       else { showToast('Gagal membuat user', 'error'); btn.disabled = false; btn.textContent = originalText; }
     };
