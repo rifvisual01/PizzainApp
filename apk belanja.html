@@ -1232,6 +1232,18 @@ function formatQty(value) {
   return n.toLocaleString('id-ID', { maximumFractionDigits: 3 });
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, function(char) {
+    return {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[char];
+  });
+}
+
 function editListItem(arr, index, listId, containerId) {
   const item = arr[index];
   if (!item) return;
@@ -1285,24 +1297,27 @@ function renderList(arr, listId, containerId) {
   arr.forEach((item, i) => {
     const row = document.createElement('div');
     row.className =
-  'flex justify-between items-center px-2 py-1.5 border-b border-gray-200 last:border-b-0 hover:bg-gray-200/50 cursor-pointer';
+  'grid grid-cols-[minmax(0,1fr)_auto] gap-2 px-2 py-2 border-b border-gray-200 last:border-b-0 hover:bg-gray-200/50 cursor-pointer';
 
 
     row.innerHTML = `
-      <div>
-        <div class="font-medium">${i + 1}. ${item[0]}</div>
-        <div class="text-[12px] text-gray-500 leading-tight">
-          ${formatQty(item[1])}x @ Rp ${item[2].toLocaleString('id-ID')} <span class="text-red-500 font-medium">- klik untuk edit</span>
+      <div class="min-w-0 flex-1 pr-1">
+        <div class="font-medium leading-snug flex items-start gap-1.5 min-w-0">
+          <span class="shrink-0">${i + 1}.</span>
+          <span class="min-w-0 break-words">${escapeHtml(item[0])}</span>
+        </div>
+        <div class="text-[12px] text-gray-500 leading-tight mt-0.5">
+          ${formatQty(item[1])}x @ Rp ${item[2].toLocaleString('id-ID')}
         </div>
       </div>
 
-      <div class="flex items-center gap-2">
-        <div class="font-semibold">
+      <div class="flex items-start gap-2 shrink-0">
+        <div class="font-semibold whitespace-nowrap text-right leading-snug">
           Rp ${item[3].toLocaleString('id-ID')}
         </div>
 
         <button
-          class="text-red-500 hover:text-red-700 text-lg font-bold"
+          class="text-red-500 hover:text-red-700 text-lg font-bold leading-none px-1"
           aria-label="Hapus item"
         >
           &times;

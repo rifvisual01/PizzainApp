@@ -2497,7 +2497,7 @@ function renderUsers(cfg) {
 
 // -- Shopping/Draft (Placeholder) --
 function renderShoppingFrame(title, pageHash) {
-  const src = `apk%20belanja.html?v=shopping-edit-decimal-20260829#${pageHash}`;
+  const src = `apk%20belanja.html?v=shopping-list-index-wrap-20260830#${pageHash}`;
   return `
   <div class="shopping-page fade-in h-full min-h-[calc(100vh-4.5rem)] flex flex-col">
     <iframe
