@@ -1,507 +1,4 @@
-// -- State --
-// Offline-first storage adapter: IndexedDB is the source of truth, Supabase syncs when online.
-(function setupStockStore() {
-  const DB_NAME = 'stock-seblak-offline-db';
-  const DB_VERSION = 1;
-  const RECORD_STORE = 'records';
-  const OUTBOX_STORE = 'outbox';
-  const cfg = window.STOCK_APP_CONFIG || {};
-  const supabaseKeyCandidates = [
-    cfg.supabasePublishableKey,
-    cfg.supabaseAnonKey
-  ].filter((key, index, keys) => key && key !== 'PASTE_SUPABASE_ANON_KEY_HERE' && keys.indexOf(key) === index);
-  let activeSupabaseKey = supabaseKeyCandidates[0] || '';
-  const tables = {
-    users: cfg.supabaseTables?.users || 'users',
-    items: cfg.supabaseTables?.items || 'items',
-    stockLogs: cfg.supabaseTables?.stockLogs || 'stock_logs'
-  };
-  const isSupabaseReady = Boolean(
-    cfg.supabaseUrl &&
-    activeSupabaseKey &&
-    window.supabase?.createClient
-  );
-
-  let db = null;
-  let handler = null;
-  let syncPromise = null;
-  let client = null;
-  let supportsTracksStock = true;
-  let supportsUserAllowedViews = true;
-  let lastSyncStatus = {
-    configured: isSupabaseReady,
-    keyType: activeSupabaseKey?.startsWith('sb_publishable_') ? 'publishable' : 'anon',
-    syncing: false,
-    lastSyncedAt: null,
-    lastError: null,
-    pendingCount: 0,
-    localCount: 0
-  };
-
-  function ok(data) { return { isOk: true, data }; }
-  function fail(error) { return { isOk: false, error: error?.message || String(error) }; }
-  function isMissingColumnError(error, column) {
-    const message = String(error?.message || error || '').toLowerCase();
-    return message.includes(column.toLowerCase()) && (
-      message.includes('column') ||
-      message.includes('schema cache') ||
-      message.includes('could not find')
-    );
-  }
-
-  function openDb() {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
-      req.onupgradeneeded = () => {
-        const nextDb = req.result;
-        if (!nextDb.objectStoreNames.contains(RECORD_STORE)) {
-          nextDb.createObjectStore(RECORD_STORE, { keyPath: '__backendId' });
-        }
-        if (!nextDb.objectStoreNames.contains(OUTBOX_STORE)) {
-          nextDb.createObjectStore(OUTBOX_STORE, { keyPath: 'queueId', autoIncrement: true });
-        }
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-  }
-
-  function tx(storeName, mode, action) {
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(storeName, mode);
-      const store = transaction.objectStore(storeName);
-      const request = action(store);
-      transaction.oncomplete = () => resolve(request?.result);
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    });
-  }
-
-  function getAll(storeName) {
-    return tx(storeName, 'readonly', store => store.getAll());
-  }
-
-function emitDataChanged(records) {
-    const clean = (records || [])
-      .filter(record => !record._deleted)
-      .sort((a, b) => String(a.__backendId).localeCompare(String(b.__backendId)));
-    handler?.onDataChanged?.(clean);
-  }
-
-  async function readLocalRecords() {
-    return await getAll(RECORD_STORE);
-  }
-
-  async function getLocal(id) {
-    return await tx(RECORD_STORE, 'readonly', store => store.get(id));
-  }
-
-  async function putLocal(record) {
-    await tx(RECORD_STORE, 'readwrite', store => store.put(record));
-  }
-
-  async function removeLocal(id) {
-    await tx(RECORD_STORE, 'readwrite', store => store.delete(id));
-  }
-
-  async function enqueue(operation, record) {
-    await tx(OUTBOX_STORE, 'readwrite', store => store.add({
-      operation,
-      record,
-      createdAt: new Date().toISOString()
-    }));
-  }
-
-  async function removeQueueItem(queueId) {
-    await tx(OUTBOX_STORE, 'readwrite', store => store.delete(queueId));
-  }
-
-  async function refreshSyncStatus(patch = {}) {
-    const [records, queued] = db
-      ? await Promise.all([readLocalRecords(), getAll(OUTBOX_STORE)])
-      : [[], []];
-    lastSyncStatus = {
-      ...lastSyncStatus,
-      configured: Boolean(client),
-      keyType: activeSupabaseKey?.startsWith('sb_publishable_') ? 'publishable' : 'anon',
-      localCount: records.filter(record => !record._deleted).length,
-      pendingCount: queued.length,
-      ...patch
-    };
-    window.stockAppSyncStatus = { ...lastSyncStatus };
-    return window.stockAppSyncStatus;
-  }
-
-  function deletedAt(record) {
-    return record._deleted ? new Date().toISOString() : null;
-  }
-
-  function tableForType(type) {
-    if (type === 'user') return tables.users;
-    if (type === 'item') return tables.items;
-    if (type === 'tx') return tables.stockLogs;
-    return null;
-  }
-
-  function toUserRow(record) {
-    const row = {
-      id: record.__backendId,
-      name: record.name || '',
-      pin: record.pin || '',
-      role: record.role || 'staff',
-      updated_at: record.updated_at || new Date().toISOString(),
-      deleted_at: deletedAt(record)
-    };
-    if (supportsUserAllowedViews) row.allowed_views = normalizeAllowedViews(record.allowed_views, record.role || 'staff');
-    return row;
-  }
-
-  function toItemRow(record) {
-    const row = {
-      id: record.__backendId,
-      name: record.name || '',
-      category: record.category || '',
-      price: Number(record.price) || 0,
-      stock: Number(record.stock) || 0,
-      min_stock: Number(record.min_stock) || 0,
-      updated_at: record.updated_at || new Date().toISOString(),
-      deleted_at: deletedAt(record)
-    };
-    if (supportsTracksStock) row.tracks_stock = record.tracks_stock !== false;
-    return row;
-  }
-
-  function toStockLogRow(record) {
-    return {
-      id: record.__backendId,
-      item_id: record.item_id || null,
-      item_name: record.name || '',
-      category: record.category || '',
-      price: Number(record.price) || 0,
-      user_name: record.user_name || '',
-      tx_type: record.tx_type || 'OUT',
-      qty: Number(record.qty) || 0,
-      stock_before: Number(record.stock_before) || 0,
-      stock_after: Number(record.stock_after) || 0,
-      note: record.note || '',
-      created_at: record.timestamp || record.updated_at || new Date().toISOString(),
-      updated_at: record.updated_at || record.timestamp || new Date().toISOString(),
-      deleted_at: deletedAt(record)
-    };
-  }
-
-  function toSupabaseRow(record) {
-    if (record.type === 'user') return toUserRow(record);
-    if (record.type === 'item') return toItemRow(record);
-    if (record.type === 'tx') return toStockLogRow(record);
-    return null;
-  }
-
-  function fromUserRow(row) {
-    return {
-      __backendId: row.id,
-      type: 'user',
-      name: row.name,
-      pin: row.pin,
-      role: row.role,
-      allowed_views: row.allowed_views == null ? undefined : normalizeAllowedViews(row.allowed_views, row.role),
-      updated_at: row.updated_at,
-      _deleted: Boolean(row.deleted_at)
-    };
-  }
-
-  function fromItemRow(row) {
-    return {
-      __backendId: row.id,
-      type: 'item',
-      name: row.name,
-      category: row.category || '',
-      price: row.price || 0,
-      tracks_stock: row.tracks_stock !== false,
-      stock: row.stock || 0,
-      min_stock: row.min_stock || 0,
-      updated_at: row.updated_at,
-      _deleted: Boolean(row.deleted_at)
-    };
-  }
-
-  function fromStockLogRow(row) {
-    return {
-      __backendId: row.id,
-      type: 'tx',
-      name: row.item_name,
-      category: row.category || '',
-      price: row.price || 0,
-      stock: 0,
-      min_stock: 0,
-      pin: '',
-      role: '',
-      item_id: row.item_id,
-      user_name: row.user_name,
-      tx_type: row.tx_type,
-      qty: row.qty || 0,
-      stock_before: row.stock_before || 0,
-      stock_after: row.stock_after || 0,
-      note: row.note || '',
-      timestamp: row.created_at || row.updated_at,
-      updated_at: row.updated_at,
-      _deleted: Boolean(row.deleted_at)
-    };
-  }
-
-  async function upsertRecord(record) {
-    const table = tableForType(record.type);
-    const row = toSupabaseRow(record);
-    if (!table || !row) return;
-
-    let { error } = await client
-      .from(table)
-      .upsert(row, { onConflict: 'id' });
-
-    if (error && record.type === 'item' && isMissingColumnError(error, 'tracks_stock')) {
-      supportsTracksStock = false;
-      delete row.tracks_stock;
-      const retry = await client
-        .from(table)
-        .upsert(row, { onConflict: 'id' });
-      error = retry.error;
-    }
-    if (error && record.type === 'user' && isMissingColumnError(error, 'allowed_views')) {
-      supportsUserAllowedViews = false;
-      delete row.allowed_views;
-      const retry = await client
-        .from(table)
-        .upsert(row, { onConflict: 'id' });
-      error = retry.error;
-    }
-
-    if (error) throw error;
-  }
-
-  async function deleteRemoteRecord(record) {
-    const table = tableForType(record.type);
-    if (!table || !record.__backendId) return;
-
-    const { error } = await client
-      .from(table)
-      .delete()
-      .eq('id', record.__backendId);
-
-    if (error) throw error;
-  }
-
-  async function pushOutbox() {
-    if (!client || !navigator.onLine) return;
-    const queued = (await getAll(OUTBOX_STORE)).sort((a, b) => a.queueId - b.queueId);
-    for (const item of queued) {
-      if (item.operation === 'delete') {
-        await upsertRecord(item.record);
-        await removeLocal(item.record.__backendId);
-      } else {
-        await upsertRecord(item.record);
-      }
-      await removeQueueItem(item.queueId);
-    }
-  }
-
-  async function fetchRemoteRows(table, columns) {
-    const pageSize = 1000;
-    const rows = [];
-
-    for (let from = 0; ; from += pageSize) {
-      const to = from + pageSize - 1;
-      const { data, error } = await client
-        .from(table)
-        .select(columns)
-        .order('updated_at', { ascending: true })
-        .range(from, to);
-
-      if (error) throw error;
-
-      const page = data || [];
-      rows.push(...page);
-      if (page.length < pageSize) break;
-    }
-
-    return rows;
-  }
-
-  async function pullRemote() {
-    if (!client || !navigator.onLine) return;
-    let usersRows = [];
-    try {
-      usersRows = await fetchRemoteRows(tables.users, 'id,name,pin,role,allowed_views,updated_at,deleted_at');
-    } catch (error) {
-      if (!isMissingColumnError(error, 'allowed_views')) throw error;
-      supportsUserAllowedViews = false;
-      usersRows = await fetchRemoteRows(tables.users, 'id,name,pin,role,updated_at,deleted_at');
-    }
-    let itemsRows = [];
-    try {
-      itemsRows = await fetchRemoteRows(tables.items, 'id,name,category,price,tracks_stock,stock,min_stock,updated_at,deleted_at');
-    } catch (error) {
-      if (!isMissingColumnError(error, 'tracks_stock')) throw error;
-      supportsTracksStock = false;
-      itemsRows = await fetchRemoteRows(tables.items, 'id,name,category,price,stock,min_stock,updated_at,deleted_at');
-    }
-    const logsRows = await fetchRemoteRows(tables.stockLogs, 'id,item_id,item_name,category,price,user_name,tx_type,qty,stock_before,stock_after,note,created_at,updated_at,deleted_at');
-
-    const remoteRecords = [
-      ...usersRows.map(fromUserRow),
-      ...itemsRows.map(fromItemRow),
-      ...logsRows.map(fromStockLogRow)
-    ];
-    const remoteIds = new Set(remoteRecords.map(record => record.__backendId));
-    const queued = await getAll(OUTBOX_STORE);
-    const queuedIds = new Set(queued.map(item => item.record?.__backendId).filter(Boolean));
-
-    for (const record of remoteRecords) {
-      if (record._deleted) {
-        await removeLocal(record.__backendId);
-      } else {
-        const local = await getLocal(record.__backendId);
-        if (record.type === 'user' && record.allowed_views == null) {
-          record.allowed_views = normalizeAllowedViews(local?.allowed_views, record.role);
-        }
-        if (local?._deleted && new Date(local.updated_at) >= new Date(record.updated_at)) {
-          continue;
-        }
-        await putLocal(record);
-      }
-    }
-
-    const localRecords = await readLocalRecords();
-    for (const local of localRecords) {
-      if (queuedIds.has(local.__backendId)) continue;
-      if (!['user', 'item', 'tx'].includes(local.type)) continue;
-      if (!remoteIds.has(local.__backendId)) {
-        await removeLocal(local.__backendId);
-      }
-    }
-    emitDataChanged(await readLocalRecords());
-  }
-
-  async function syncNow() {
-    if (!client || syncPromise) return syncPromise;
-    syncPromise = (async () => {
-      try {
-        await refreshSyncStatus({ syncing: true, lastError: null });
-        await pushOutbox();
-        await pullRemote();
-        await refreshSyncStatus({ syncing: false, lastSyncedAt: new Date().toISOString(), lastError: null });
-      } catch (error) {
-        await refreshSyncStatus({ syncing: false, lastError: error.message || String(error) });
-        console.warn('[SYNC] Pending until online/configured:', error.message || error);
-      } finally {
-        syncPromise = null;
-      }
-    })();
-    return syncPromise;
-  }
-
-  async function syncAfterWrite() {
-    await syncNow();
-    return await refreshSyncStatus();
-  }
-
-  async function connectSupabase() {
-    let lastError = null;
-    for (const key of supabaseKeyCandidates) {
-      activeSupabaseKey = key;
-      client = window.supabase.createClient(cfg.supabaseUrl, key);
-      await syncNow();
-      if (!lastSyncStatus.lastError) {
-        return true;
-      }
-      lastError = lastSyncStatus.lastError;
-    }
-    await refreshSyncStatus({ lastError });
-    return false;
-  }
-
-  window.stockStore = {
-    async init(dataHandler) {
-      try {
-        handler = dataHandler;
-        db = await openDb();
-        emitDataChanged(await readLocalRecords());
-        await refreshSyncStatus();
-
-        if (isSupabaseReady) {
-          window.addEventListener('online', syncNow);
-          window.addEventListener('focus', syncNow);
-          document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) syncNow();
-          });
-          setInterval(syncNow, 30000);
-          await connectSupabase();
-        } else {
-          console.warn('[SYNC] Supabase key belum diisi. Aplikasi berjalan offline-only sampai konfigurasi lengkap.');
-        }
-        return ok();
-      } catch (error) {
-        return fail(error);
-      }
-    },
-
-    async create(record) {
-      try {
-        const next = {
-          ...record,
-          __backendId: record.__backendId || genId(),
-          updated_at: new Date().toISOString()
-        };
-        await putLocal(next);
-        await enqueue('upsert', next);
-        emitDataChanged(await readLocalRecords());
-        await refreshSyncStatus();
-        syncNow();
-        return ok(next);
-      } catch (error) {
-        return fail(error);
-      }
-    },
-
-    async update(record) {
-      try {
-        const next = { ...record, updated_at: new Date().toISOString() };
-        await putLocal(next);
-        await enqueue('upsert', next);
-        emitDataChanged(await readLocalRecords());
-        await refreshSyncStatus();
-        syncNow();
-        return ok(next);
-      } catch (error) {
-        return fail(error);
-      }
-    },
-
-    async delete(record) {
-      try {
-        const deleted = { ...record, _deleted: true, updated_at: new Date().toISOString() };
-        await putLocal(deleted);
-        await enqueue('delete', deleted);
-        emitDataChanged(await readLocalRecords());
-        await refreshSyncStatus();
-        syncNow();
-        return ok(deleted);
-      } catch (error) {
-        return fail(error);
-      }
-    },
-
-    syncNow,
-    syncAfterWrite,
-
-    async getSyncStatus() {
-      try {
-        return ok(await refreshSyncStatus());
-      } catch (error) {
-        return fail(error);
-      }
-    }
-  };
-})();
+// Storage/synchronization is implemented in stock-store.js (protocol v2).
 
 window.allData = [];
 window.currentUser = null;
@@ -709,18 +206,8 @@ function getTxDuplicateKey(tx) {
 }
 
 function getDisplayTxs() {
-  const sorted = getTxs().slice().sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-  const seen = new Set();
-  const unique = [];
-
-  sorted.forEach(tx => {
-    const key = getTxDuplicateKey(tx);
-    if (seen.has(key)) return;
-    seen.add(key);
-    unique.push(tx);
-  });
-
-  return unique.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+  // Idempotency is enforced by Supabase IDs, not by hiding similar transactions.
+  return getTxs();
 }
 function getAnalyticsTxs() { return getDisplayTxs(); }
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -1068,11 +555,11 @@ function showSyncResult(status, successMsg) {
   lastRenderKey = '';
   render();
   if (status?.lastError) {
-    showToast('Tersimpan lokal, sync gagal: ' + status.lastError, 'error');
+    showToast(status.lastError, 'error');
     return;
   }
-  if (status?.pendingCount > 0) {
-    showToast(`Tersimpan lokal, ${status.pendingCount} data menunggu sync`, 'error');
+  if (!status?.configured) {
+    showToast('Supabase belum terhubung. Perubahan belum disimpan.', 'error');
     return;
   }
   showToast(successMsg);
@@ -1516,17 +1003,23 @@ function renderNotifBadge() {
 function renderSyncBadge() {
   const status = window.stockAppSyncStatus;
   if (!status) return '';
-  if (!status.configured) {
+  if (!status.configured || !navigator.onLine) {
     return `<button id="btn-sync-now" class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/15 text-white/80 text-[11px] font-800" title="Mode offline, klik untuk cek koneksi sync"><i data-lucide="refresh-cw" style="width:12px;height:12px"></i>Offline</button>`;
   }
   if (status.lastError) {
-    return `<button id="btn-sync-now" class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-yellow-300 text-red-800 text-[11px] font-900" title="${status.lastError}"><i data-lucide="refresh-cw" style="width:12px;height:12px"></i>Sync Error</button>`;
+    return `<button id="btn-sync-now" class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-yellow-300 text-red-800 text-[11px] font-900" title="${escapeHtml(status.lastError)}"><i data-lucide="refresh-cw" style="width:12px;height:12px"></i>Sync Error</button>`;
   }
-  if (status.pendingCount > 0 || status.syncing) {
-    return `<button id="btn-sync-now" class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/20 text-white text-[11px] font-800" title="Klik untuk sync dan refresh data terbaru"><i data-lucide="refresh-cw" style="width:12px;height:12px"></i>${status.syncing ? 'Sync...' : `${status.pendingCount} Pending`}</button>`;
+  if (status.writing || status.syncing) {
+    return `<button id="btn-sync-now" class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/20 text-white text-[11px] font-800" title="Menunggu respons Supabase"><i data-lucide="loader-circle" class="animate-spin" style="width:12px;height:12px"></i>${status.writing ? 'Menyimpan...' : 'Memuat...'}</button>`;
   }
   return `<button id="btn-sync-now" class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/15 text-white text-[11px] font-800" title="Klik untuk refresh data terbaru"><i data-lucide="refresh-cw" style="width:12px;height:12px"></i>Synced</button>`;
 }
+
+window.addEventListener('stock-sync-status', () => {
+  const badge = document.getElementById('btn-sync-now');
+  if (badge) { badge.outerHTML = renderSyncBadge(); safeCreateIcons(); }
+});
+
 
 function renderConfirmModal() {
   return `
@@ -2019,7 +1512,7 @@ function renderTransaction(cfg) {
     </div>
     <div class="bg-white rounded-xl border border-gray-200 px-4 py-3">
       <label class="block text-xs font-800 text-gray-700 mb-1.5">Tanggal Transaksi</label>
-      <input id="tx-date" type="date" value="${window.txDate || todayValue}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-red-400">
+      <input id="tx-date" type="date" ${window.isProcessingTx ? 'disabled' : ''} value="${window.txDate || todayValue}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-red-400">
     </div>
     
     <!-- Search -->
@@ -2056,8 +1549,8 @@ function renderTransaction(cfg) {
                     <div class="text-xs text-gray-500 mt-1">${isAdmin ? `${formatCurrency(item.price)} &middot; ` : ''}${item.category ? `${item.category} &middot; ` : ''}${itemUsesStock(item) ? `Stok: ${item.stock}` : 'Tanpa stok'}${isOutOfStock ? ' &middot; Habis' : ''}</div>
                   </div>
                   <div class="flex items-center gap-2 ml-3 shrink-0">
-                    ${qty > 0 ? `<button data-quick-minus="${item.__backendId}" class="w-9 h-9 rounded-lg bg-red-100 text-red-700 flex items-center justify-center font-900 hover:bg-red-200 transition">-</button><span class="min-w-8 text-center px-2 py-1 rounded-full bg-red-600 text-white text-sm font-700">${qty}</span>` : ''}
-                    <button data-add-tx-item="${item.__backendId}" class="w-10 h-10 rounded-lg ${isOutOfStock ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-red-600 text-white group-hover:shadow-md hover:bg-red-700'} flex items-center justify-center font-900 transition" title="${isOutOfStock ? `${item.name} habis` : `Tambah ${item.name}`}">+</button>
+                    ${qty > 0 ? `<button data-quick-minus="${item.__backendId}" class="w-9 h-9 rounded-lg bg-red-100 text-red-700 flex items-center justify-center font-900 hover:bg-red-200 transition">-</button><span class="min-w-8 text-center px-2 py-1 rounded-full ${txType === 'IN' ? 'bg-emerald-600' : 'bg-red-600'} text-white text-sm font-700">${txType === 'IN' ? '+' : '-'}${qty}</span>` : ''}
+                    <button data-add-tx-item="${item.__backendId}" class="w-10 h-10 rounded-lg ${isOutOfStock ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : txType === 'IN' ? 'bg-emerald-600 text-white group-hover:shadow-md hover:bg-emerald-700' : 'bg-red-600 text-white group-hover:shadow-md hover:bg-red-700'} flex items-center justify-center font-900 transition" title="${isOutOfStock ? `${item.name} habis` : `${txType === 'IN' ? 'Stok masuk' : 'Stok keluar'}: ${item.name}`}">${txType === 'IN' || qty > 0 ? '+' : '-'}</button>
                   </div>
                 </div>`;
               }).join('')}
@@ -2095,8 +1588,8 @@ function renderTransaction(cfg) {
                   <div class="text-xs text-gray-500 mt-1">${isAdmin ? `${formatCurrency(item.price)} &middot; ` : ''}${itemUsesStock(item) ? `Stok: ${item.stock}` : 'Tanpa stok'}${isOutOfStock ? ' &middot; Habis' : ''}</div>
                 </div>
                 <div class="flex items-center gap-2 ml-3 shrink-0">
-                  ${qty > 0 ? `<button data-quick-minus="${item.__backendId}" class="w-9 h-9 rounded-lg bg-red-100 text-red-700 flex items-center justify-center font-900 hover:bg-red-200 transition">-</button><span class="min-w-8 text-center px-2 py-1 rounded-full bg-red-600 text-white text-sm font-700">${qty}</span>` : ''}
-                  <button data-add-tx-item="${item.__backendId}" class="w-10 h-10 rounded-lg ${isOutOfStock ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-red-600 text-white group-hover:shadow-md hover:bg-red-700'} flex items-center justify-center font-900 transition" title="${isOutOfStock ? `${item.name} habis` : `Tambah ${item.name}`}">+</button>
+                  ${qty > 0 ? `<button data-quick-minus="${item.__backendId}" class="w-9 h-9 rounded-lg bg-red-100 text-red-700 flex items-center justify-center font-900 hover:bg-red-200 transition">-</button><span class="min-w-8 text-center px-2 py-1 rounded-full ${txType === 'IN' ? 'bg-emerald-600' : 'bg-red-600'} text-white text-sm font-700">${txType === 'IN' ? '+' : '-'}${qty}</span>` : ''}
+                  <button data-add-tx-item="${item.__backendId}" class="w-10 h-10 rounded-lg ${isOutOfStock ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : txType === 'IN' ? 'bg-emerald-600 text-white group-hover:shadow-md hover:bg-emerald-700' : 'bg-red-600 text-white group-hover:shadow-md hover:bg-red-700'} flex items-center justify-center font-900 transition" title="${isOutOfStock ? `${item.name} habis` : `${txType === 'IN' ? 'Stok masuk' : 'Stok keluar'}: ${item.name}`}">${txType === 'IN' || qty > 0 ? '+' : '-'}</button>
                 </div>
               </div>`;
             }).join('')}
@@ -2115,7 +1608,7 @@ function renderTransaction(cfg) {
         </div>
         <div class="flex gap-2 flex-1 sm:flex-none">
           <button id="btn-submit-tx-from-bar" ${window.isProcessingTx ? 'disabled' : ''} class="flex-1 sm:flex-auto px-6 py-2.5 rounded-xl ${txType==='IN'?'bg-emerald-600 hover:bg-emerald-700':'bg-red-700 hover:bg-red-800'} text-white text-sm font-600 transition btn-primary disabled:opacity-60 disabled:cursor-not-allowed">
-            <i data-lucide="${txType==='IN'?'arrow-down':'arrow-up'}" style="width:16px;height:16px;display:inline;margin-right:6px"></i>
+            ${window.isProcessingTx ? '<span class="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin align-middle mr-2" role="status" aria-label="Menunggu konfirmasi Supabase"></span>' : `<i data-lucide="${txType==='IN'?'arrow-down':'arrow-up'}" style="width:16px;height:16px;display:inline;margin-right:6px"></i>`}
             ${window.isProcessingTx ? 'Menyimpan...' : (txType==='IN'?'Input Masuk':'Input Keluar')}
           </button>
           <button id="btn-tx-cancel" class="px-4 py-2.5 rounded-xl border border-white/30 text-white text-sm font-600 hover:bg-white/10 transition">
@@ -2130,16 +1623,22 @@ function renderTransaction(cfg) {
     ${showTxCartDetail ? `
     <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-40 p-4 fade-in">
       <div class="modal-box bg-white rounded-2xl shadow-2xl w-full max-w-4xl p-6 max-h-96 overflow-auto">
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="font-700 text-lg text-gray-800">Keranjang (${txCart.length} item)</h3>
-          <button id="btn-close-cart-detail" class="p-1 rounded-lg hover:bg-gray-100 text-gray-400">
-            <i data-lucide="x" style="width:18px;height:18px"></i>
-          </button>
+        <div class="relative overflow-hidden rounded-2xl border p-4 mb-4 bg-gradient-to-br ${txType==='IN'?'from-emerald-50 via-white to-emerald-100 border-emerald-200':'from-red-50 via-white to-red-100 border-red-200'}">
+          <div aria-hidden="true" class="pointer-events-none absolute -right-8 -top-8 w-24 h-24 rounded-full ${txType==='IN'?'bg-emerald-200/40':'bg-red-200/40'}"></div>
+          <div class="relative flex items-center gap-3">
+            <div class="w-11 h-11 shrink-0 rounded-xl bg-gradient-to-br ${txType==='IN'?'from-emerald-500 to-emerald-700':'from-red-500 to-red-700'} text-white flex items-center justify-center shadow-sm">
+              <i data-lucide="${txType==='IN'?'arrow-down-to-line':'arrow-up-from-line'}" style="width:23px;height:23px"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <h3 class="text-lg font-800 leading-tight ${txType==='IN'?'text-emerald-900':'text-red-900'}">${txType==='IN'?'Stok Masuk':'Stok Keluar'}</h3>
+              <p class="text-xs sm:text-sm mt-1 leading-snug ${txType==='IN'?'text-emerald-700':'text-red-700'}">${txType==='IN'?'Stok akan bertambah':'Stok akan berkurang'}</p>
+            </div>
+            <button id="btn-close-cart-detail" ${window.isProcessingTx ? 'disabled' : ''} aria-label="Tutup konfirmasi" class="w-8 h-8 shrink-0 rounded-full bg-white/80 flex items-center justify-center transition disabled:opacity-50 ${txType==='IN'?'text-emerald-700 hover:bg-emerald-100':'text-red-700 hover:bg-red-100'}">
+              <i data-lucide="x" style="width:16px;height:16px"></i>
+            </button>
+          </div>
         </div>
         <div class="space-y-2 mb-5 max-h-48 overflow-y-auto">
-          <div class="${txType==='IN'?'bg-emerald-50 border-emerald-200 text-emerald-800':'bg-red-50 border-red-200 text-red-800'} border rounded-xl px-3 py-2 text-xs font-700">
-            Mode: ${txType==='IN'?'STOK MASUK - stok akan bertambah':'STOK KELUAR - stok akan berkurang'}
-          </div>
           ${txCart.map((cartItem, idx) => {
             const itemData = getItems().find(i => i.__backendId === cartItem.itemId);
             return `
@@ -2149,7 +1648,7 @@ function renderTransaction(cfg) {
               </div>
               <div class="flex items-center gap-1 shrink-0">
                 <button data-qty-minus="${idx}" class="w-6 h-6 rounded bg-red-200 hover:bg-red-300 text-red-700 font-700 text-xs transition">-</button>
-                <input data-edit-qty="${idx}" type="number" min="1" value="${cartItem.qty}" class="w-10 border border-red-300 rounded px-1 py-0.5 text-xs text-center font-600">
+                <input data-edit-qty="${idx}" type="number" min="1" ${window.isProcessingTx ? 'disabled' : ''} value="${cartItem.qty}" class="w-10 border border-red-300 rounded px-1 py-0.5 text-xs text-center font-600">
                 <button data-qty-plus="${idx}" class="w-6 h-6 rounded bg-red-200 hover:bg-red-300 text-red-700 font-700 text-xs transition">+</button>
               </div>
               <button data-remove-tx-item="${idx}" class="p-1 rounded hover:bg-red-200 text-red-600 shrink-0">
@@ -2160,7 +1659,7 @@ function renderTransaction(cfg) {
         </div>
         <div class="flex gap-2 pt-3 border-t border-gray-200">
           <button id="btn-close-cart-detail-cancel" ${window.isProcessingTx ? 'disabled' : ''} class="flex-1 py-2.5 rounded-xl border border-gray-300 text-sm font-600 text-gray-600 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed">Batal</button>
-          <button id="btn-submit-tx-batch" ${window.isProcessingTx ? 'disabled' : ''} class="flex-1 py-2.5 rounded-xl ${txType==='IN'?'bg-emerald-600 hover:bg-emerald-700':'bg-red-600 hover:bg-red-700'} text-white text-sm font-600 btn-primary disabled:opacity-60 disabled:cursor-not-allowed">${window.isProcessingTx ? 'Menyimpan...' : `Simpan ${txType==='IN'?'Stok Masuk':'Stok Keluar'}`}</button>
+          <button id="btn-submit-tx-batch" ${window.isProcessingTx ? 'disabled' : ''} aria-busy="${window.isProcessingTx}" class="flex-1 py-2.5 rounded-xl ${txType==='IN'?'bg-emerald-600 hover:bg-emerald-700':'bg-red-600 hover:bg-red-700'} text-white text-sm font-600 btn-primary disabled:opacity-60 disabled:cursor-not-allowed">${window.isProcessingTx ? '<span class="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin align-middle mr-2" role="status" aria-label="Menunggu konfirmasi Supabase"></span>Menyimpan...' : (txType==='IN'?'Masukkan Stok':'Keluarkan Stok')}</button>
         </div>
       </div>
     </div>
@@ -2249,27 +1748,27 @@ function renderHistory(cfg) {
           const uv = getUserVisual(tx.user_name);
           return `
           <div class="rounded-xl border transition hover:shadow-md ${isAdmin ? `${tx.tx_type === 'IN' ? uv.bg : uv.strongBg} ${tx.tx_type === 'IN' ? uv.border : 'border-transparent'}` : `${st.bgClass} border-l-4`}">
-            <div class="p-4 flex items-start gap-3">
-              <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${st.color === 'emerald' ? 'bg-emerald-200' : 'bg-red-200'}">
-                <i data-lucide="${st.icon}" style="width:18px;height:18px;color:${st.color === 'emerald' ? '#059669' : '#dc2626'}"></i>
+            <div class="p-3 flex items-start gap-2.5">
+              <div class="w-8 h-8 mt-0.5 rounded-lg flex items-center justify-center shrink-0 ${st.color === 'emerald' ? 'bg-emerald-200' : 'bg-red-200'}">
+                <i data-lucide="${st.icon}" style="width:16px;height:16px;color:${st.color === 'emerald' ? '#059669' : '#dc2626'}"></i>
               </div>
               <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="font-700 text-sm ${st.color === 'emerald' ? 'text-gray-800' : 'text-white'}">${tx.name||'-'}</span>
-                  <span class="px-2 py-0.5 rounded text-[10px] font-700 ${st.color === 'emerald' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-200 text-red-800'}">${tx.tx_type}</span>
+                <div class="flex items-start gap-1.5 flex-wrap">
+                  <span class="font-700 text-sm leading-snug break-words min-w-0 ${st.color === 'emerald' ? 'text-gray-800' : 'text-white'}">${escapeHtml(tx.name||'-')}</span>
+                  <span class="px-1.5 py-0.5 rounded text-[10px] leading-tight font-700 shrink-0 ${st.color === 'emerald' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-200 text-red-800'}">${tx.tx_type}</span>
                 </div>
-                <div class="text-xs ${st.color === 'emerald' ? 'text-gray-500' : 'text-white/70'} mt-2 flex flex-wrap gap-4">
-                  <span class="flex items-center gap-1 ${isAdmin && tx.tx_type === 'IN' ? uv.text : ''}"><i data-lucide="user" style="width:12px;height:12px"></i>${tx.user_name}</span>
-                  <span class="flex items-center gap-1"><i data-lucide="clock" style="width:12px;height:12px"></i>${formatDate(tx.timestamp)}</span>
+                <div class="text-[11px] leading-snug ${st.color === 'emerald' ? 'text-gray-500' : 'text-white/75'} mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
+                  <span class="inline-flex items-start gap-1 min-w-0 break-words ${isAdmin && tx.tx_type === 'IN' ? uv.text : ''}"><i data-lucide="user" class="shrink-0 mt-0.5" style="width:11px;height:11px"></i>${escapeHtml(tx.user_name || '-')}</span>
+                  <span class="inline-flex items-center gap-1"><i data-lucide="clock" class="shrink-0" style="width:11px;height:11px"></i>${formatDate(tx.timestamp)}</span>
                 </div>
+                ${tx.note ? `<p class="text-[11px] leading-snug mt-1 break-words ${st.color === 'emerald' ? 'text-gray-600' : 'text-white/80'}">${escapeHtml(tx.note)}</p>` : ''}
               </div>
               <div class="text-right shrink-0">
-                <div class="text-lg font-800 ${st.color === 'emerald' ? 'text-emerald-600' : 'text-white'}">${tx.tx_type==='IN'?'+':'-'}${tx.qty}</div>
-                ${isAdmin ? `
-                <button data-del-tx="${tx.__backendId}" class="mt-2 inline-flex items-center justify-center w-8 h-8 rounded-lg ${st.color === 'emerald' ? 'bg-red-50 border border-red-200 text-red-600 hover:bg-red-100' : 'bg-white/15 border border-white/20 text-white hover:bg-white/25'} transition" title="Hapus transaksi">
-                  <i data-lucide="trash-2" style="width:14px;height:14px"></i>
-                </button>` : ''}
-                <div class="text-[10px] ${st.color === 'emerald' ? 'text-gray-400' : 'text-white/60'} mt-1">${tx.stock_before} -> ${tx.stock_after}</div>
+                <div class="flex items-center justify-end gap-2">
+                  <span class="text-base leading-none font-800 ${st.color === 'emerald' ? 'text-emerald-600' : 'text-white'}">${tx.tx_type==='IN'?'+':'-'}${tx.qty}</span>
+                  ${isAdmin ? `<button data-del-tx="${tx.__backendId}" class="inline-flex items-center justify-center w-7 h-7 rounded-lg ${st.color === 'emerald' ? 'bg-red-50 border border-red-200 text-red-600 hover:bg-red-100' : 'bg-white/15 border border-white/20 text-white hover:bg-white/25'} transition" title="Hapus transaksi" aria-label="Hapus transaksi ${escapeHtml(tx.name || '')}"><i data-lucide="trash-2" style="width:13px;height:13px"></i></button>` : ''}
+                </div>
+                <div class="text-[10px] leading-tight whitespace-nowrap ${st.color === 'emerald' ? 'text-gray-500' : 'text-white/70'} mt-1">${tx.stock_before} -> ${tx.stock_after}</div>
               </div>
             </div>
           </div>`;
@@ -2553,6 +2052,7 @@ async function handleMainClick(e) {
   }
   const btn = e.target.closest('button, [role="button"]');
   if (!btn) return;
+  if (window.isProcessingTx) { e.preventDefault(); return; }
     if (btn.dataset.loginUser) {
       e.preventDefault();
       e.stopPropagation();
@@ -2647,14 +2147,25 @@ async function handleMainClick(e) {
     }
 
     if (btn.id === 'btn-sync-now') {
-      const status = await window.stockStore.syncAfterWrite?.();
+      if (window.stockAppSyncStatus?.uncertain) {
+        const result = await window.stockStore.resolveUncertain();
+        if (!result.isOk) { showToast(result.error, 'error'); return; }
+        if (result.data?.request?.kind === 'movement' && !result.data.cancelled) {
+          const entries = result.data.request.entries;
+          const sameCart = entries.length === window.txCart.length && entries.every(entry => window.txCart.some(line => line.itemId === entry.item_id && Number(line.qty) === entry.qty && (line.note || '') === entry.note)) && entries[0]?.tx_type === window.txType;
+          if (sameCart) { window.txCart = []; window.showTxCartDetail = false; }
+        }
+        if (result.data?.request?.kind === 'save_item' && !result.data.cancelled) {
+          window.showItemForm = false; window.editingItem = null;
+        }
+        lastRenderKey = ''; render();
+        showToast(result.data?.cancelled ? 'Permintaan sebelumnya belum tersimpan. Silakan tekan Simpan lagi.' : 'Supabase mengonfirmasi perubahan sudah tersimpan.');
+        return;
+      }
+      const status = await window.stockStore.syncNow();
       lastRenderKey = '';
       render();
-      if (status?.lastError) {
-        showToast('Sync gagal: ' + status.lastError, 'error');
-      } else {
-        showToast('Data tersinkron ke Supabase');
-      }
+      showSyncResult(status, 'Data tersinkron ke Supabase');
       return;
     }
 
@@ -2781,7 +2292,7 @@ async function handleMainClick(e) {
         showConfirm(`Hapus barang "${item.name}"?`, async () => {
           hideConfirm();
           const r = await window.stockStore.delete(item);
-          if (r.isOk) { showToast('Barang dihapus'); } else showToast('Gagal menghapus', 'error');
+          if (r.isOk) { showSyncResult(await window.stockStore.syncAfterWrite(), 'Barang dihapus'); } else showToast(r.error || 'Gagal menghapus', 'error');
         });
       }
       return;
@@ -2932,39 +2443,14 @@ async function handleMainClick(e) {
         lastRenderKey = '';
         render();
 
-        let successCount = 0;
-        let errorCount = 0;
+        const txType = window.txType;
         const txTimestamp = getTransactionTimestamp(window.txDate);
 
         try {
-          for (const cartItem of originalCart) {
-            const item = getItems().find(i => i.__backendId === cartItem.itemId);
-            if (!item) continue;
-
-            const usesStock = itemUsesStock(item);
-            if (window.txType === 'OUT' && usesStock && cartItem.qty > item.stock) {
-              errorCount++;
-              continue;
-            }
-
-            const stockBefore = usesStock ? item.stock : 0;
-            const stockAfter = usesStock
-              ? (window.txType === 'IN' ? stockBefore + cartItem.qty : stockBefore - cartItem.qty)
-              : 0;
-
-            if (usesStock) {
-              const updatedItem = { ...item, stock: stockAfter };
-              const r1 = await window.stockStore.update(updatedItem);
-              if (!r1.isOk) { errorCount++; continue; }
-            }
-
-            const r2 = await window.stockStore.create({
-              type: 'tx', name: item.name, category: item.category || '', price: item.price || 0, stock: 0, min_stock: 0, pin: '', role: '',
-              item_id: item.__backendId, user_name: window.currentUser.name, tx_type: window.txType, qty: cartItem.qty,
-              stock_before: stockBefore, stock_after: stockAfter, note: cartItem.note, timestamp: txTimestamp
-            });
-            if (!r2.isOk) { errorCount++; continue; }
-            successCount++;
+          const result = await window.stockStore.applyMovement(originalCart, txType, txTimestamp);
+          if (!result.isOk) {
+            showToast(result.error || 'Transaksi gagal disimpan. Keranjang dipertahankan.', 'error');
+            return;
           }
 
           window.txCart = [];
@@ -2973,8 +2459,8 @@ async function handleMainClick(e) {
           window.showTxCartDetail = false;
           window.showMobileMenu = false; // Close menu
 
-          if (successCount > 0) { showToast(`${successCount} item ${window.txType === 'IN' ? 'masuk' : 'keluar'} berhasil`); }
-          if (errorCount > 0) { showToast(`${errorCount} item gagal diproses`, 'error'); }
+          const status = await window.stockStore.syncAfterWrite();
+          showSyncResult(status, `${originalCart.length} item ${txType === 'IN' ? 'masuk' : 'keluar'} berhasil`);
         } finally {
           processingTxBatchKeys.delete(batchKey);
           window.isProcessingTx = false;
@@ -2999,25 +2485,12 @@ async function handleMainClick(e) {
 
       showConfirm(`Hapus transaksi "${tx.name}" (${tx.tx_type} ${tx.qty})? Stok akan disesuaikan kembali.`, async () => {
         hideConfirm();
-        const item = getItems().find(i => i.__backendId === tx.item_id) || getItems().find(i => i.name === tx.name);
-
-        if (item && itemUsesStock(item)) {
-          const stock = Number(item.stock) || 0;
-          const qty = Number(tx.qty) || 0;
-          const nextStock = tx.tx_type === 'OUT' ? stock + qty : Math.max(0, stock - qty);
-          const stockResult = await window.stockStore.update({ ...item, stock: nextStock });
-          if (!stockResult.isOk) {
-            showToast('Gagal menyesuaikan stok', 'error');
-            return;
-          }
-        }
-
-        const deleteResult = await window.stockStore.delete(tx);
+        const deleteResult = await window.stockStore.reverseMovement(tx);
         if (deleteResult.isOk) {
           const status = await window.stockStore.syncAfterWrite?.();
           showSyncResult(status, 'Transaksi dihapus');
         } else {
-          showToast('Gagal menghapus transaksi', 'error');
+          showToast(deleteResult.error || 'Gagal menghapus transaksi', 'error');
         }
       });
       return;
@@ -3219,7 +2692,7 @@ function bindFormHandlers() {
       btn.textContent = 'Menyimpan...';
       if (window.editingItem) {
         const updated = { ...window.editingItem, name, category, price, tracks_stock, stock, min_stock };
-        const r = await window.stockStore.update(updated);
+        const r = await window.stockStore.saveItem(updated, window.editingItem);
         if (r.isOk) {
           const status = await window.stockStore.syncAfterWrite();
           window.showItemForm = false;
@@ -3227,9 +2700,9 @@ function bindFormHandlers() {
           window.showMobileMenu = false;
           showSyncResult(status, 'Barang diperbarui dan tersinkron');
         }
-        else { showToast('Gagal memperbarui', 'error'); btn.disabled = false; btn.textContent = originalText; }
+        else { showToast(r.error || 'Gagal memperbarui', 'error'); btn.disabled = false; btn.textContent = originalText; }
       } else {
-        const r = await window.stockStore.create({ type: 'item', name, category, price, tracks_stock, stock, min_stock });
+        const r = await window.stockStore.saveItem({ type: 'item', name, category, price, tracks_stock, stock, min_stock }, null);
         if (r.isOk) {
           const status = await window.stockStore.syncAfterWrite();
           window.showItemForm = false;
@@ -3374,6 +2847,7 @@ async function initializeApp() {
     const result = await window.stockStore.init(dataHandler);
     if (!result.isOk) {
       console.error('[APP] Failed to init stock store:', result.error);
+      if (window.showStartupError) { window.showStartupError(result.error); return; }
       // Still render even if SDK fails
       lastRenderKey = '';
       render();
