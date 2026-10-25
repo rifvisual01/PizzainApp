@@ -333,6 +333,7 @@ function getShoppingClient() {
 }
 
 function markShoppingSummaryState(patch) {
+  if (patch.status === 'idle') window.shoppingSummaryRequestToken = null;
   window.shoppingDashboardSummary = {
     ...(window.shoppingDashboardSummary || { status:'idle', version:0, data:null, error:'' }),
     ...patch,
@@ -373,7 +374,10 @@ function getShoppingExpenseTotal(totalMap, id) {
 
 async function loadShoppingDashboardSummary(force = false) {
   const current = window.shoppingDashboardSummary || { status:'idle' };
-  if (!force && current.status === 'loading') return;
+  const actor = window.currentUser;
+  const actorKey = JSON.stringify([actor?.__backendId, actor?.role, actor?.allowed_views]);
+  if (!actor) return;
+  if (!force && current.status === 'loading' && current.actorKey === actorKey) return;
   const client = getShoppingClient();
   if (!client) {
     markShoppingSummaryState({ status:'error', error:'Koneksi Supabase belanja belum siap' });
@@ -382,36 +386,30 @@ async function loadShoppingDashboardSummary(force = false) {
     return;
   }
 
-  markShoppingSummaryState({ status:'loading', error:'' });
+  markShoppingSummaryState({ status:'loading', error:'', data:null, actorKey });
+  const token = {};
+  window.shoppingSummaryRequestToken = token;
 
   try {
-    const tables = getShoppingTables();
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-
-    const expenseSelect = 'id,tempat_belanja,status,created_at,updated_at';
-    const monthResult = await client
-      .from(tables.expenses)
-      .select(expenseSelect)
-      .eq('status', 'submitted')
-      .is('deleted_at', null)
-      .gte('created_at', monthStart.toISOString())
-      .lt('created_at', nextMonthStart.toISOString())
-      .order('created_at', { ascending:false })
-      .limit(1000);
-
-    if (monthResult.error) throw monthResult.error;
-
-    const monthExpenses = monthResult.data || [];
-    const allExpenseIds = monthExpenses.map(expense => expense.id).filter(Boolean);
-
-    const [itemRows, operationalRows] = await Promise.all([
-      fetchShoppingLines(client, tables.items, allExpenseIds),
-      fetchShoppingLines(client, tables.operational, allExpenseIds)
-    ]);
+    const dateKey = date => new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Jakarta', year:'numeric', month:'2-digit', day:'2-digit' }).format(date);
+    const day = dateKey(now);
+    const todayStart = new Date(day + 'T00:00:00+07:00');
+    const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+    const monthStart = new Date(day.slice(0,7) + '-01T00:00:00+07:00');
+    const [year,month] = day.split('-').map(Number);
+    const nextMonthStart = new Date(Date.UTC(year,month,1)-7*60*60*1000);
+    const { data:expenses, error } = await client.rpc('shopping_list_v1', {
+      p_actor_id:actor?.__backendId, p_actor_pin:actor?.pin, p_status:'submitted',
+      p_start_date:dateKey(monthStart), p_end_date:dateKey(new Date(nextMonthStart.getTime()-1))
+    });
+    if (error) throw error;
+    if (window.shoppingSummaryRequestToken !== token || window.currentUser !== actor) return;
+    // The server returns the same canonical shopping data used by reports.
+    const monthExpenses = (expenses || []).map(expense => ({ ...expense, created_at:expense.submitted_at || expense.created_at }));
+    const allExpenseIds = monthExpenses.map(expense => expense.id);
+    const itemRows = monthExpenses.flatMap(expense => (expense.items || []).map(line => ({ expense_id:expense.id, line_total:line[3] })));
+    const operationalRows = monthExpenses.flatMap(expense => (expense.operasional || []).map(line => ({ expense_id:expense.id, line_total:line[3] })));
 
     const totalMap = new Map();
     allExpenseIds.forEach(id => totalMap.set(id, { items:0, operational:0 }));
@@ -450,6 +448,7 @@ async function loadShoppingDashboardSummary(force = false) {
       }
     });
   } catch (error) {
+    if (window.shoppingSummaryRequestToken !== token || window.currentUser !== actor) return;
     console.warn('[SHOPPING DASHBOARD] Gagal memuat ringkasan belanja:', error?.message || error);
     markShoppingSummaryState({ status:'error', error:error?.message || String(error) });
   }
@@ -459,7 +458,13 @@ async function loadShoppingDashboardSummary(force = false) {
 }
 
 function ensureShoppingDashboardSummary() {
-  const state = window.shoppingDashboardSummary || { status:'idle' };
+  let state = window.shoppingDashboardSummary || { status:'idle' };
+  const actor = window.currentUser;
+  const actorKey = JSON.stringify([actor?.__backendId, actor?.role, actor?.allowed_views]);
+  if (state.actorKey !== actorKey) {
+    markShoppingSummaryState({ status:'idle', data:null, error:'', actorKey });
+    state = window.shoppingDashboardSummary;
+  }
   if (state.status === 'idle') {
     loadShoppingDashboardSummary();
   }
@@ -1995,8 +2000,24 @@ function renderUsers(cfg) {
 }
 
 // -- Shopping/Draft (Placeholder) --
+// Only the currently mounted shopping iframe receives the logged-in account.
+window.addEventListener('message', event => {
+  const frame = document.querySelector('iframe.shopping-frame');
+  if (!frame || event.source !== frame.contentWindow) return;
+  if (location.protocol !== 'file:' && event.origin !== location.origin) return;
+  if (event.data?.type === 'pizzain-shopping-ready') {
+    const user = window.currentUser;
+    frame.contentWindow.postMessage({ type:'pizzain-shopping-session', user:user ? {
+      id:user.__backendId, name:user.name, pin:user.pin, role:user.role, allowed_views:user.allowed_views
+    } : null }, location.protocol === 'file:' ? '*' : location.origin);
+  }
+  if (event.data?.type === 'pizzain-shopping-changed') {
+    markShoppingSummaryState({ status:'idle' });
+  }
+});
+
 function renderShoppingFrame(title, pageHash) {
-  const src = `apk%20belanja.html?v=shopping-list-index-wrap-20260830#${pageHash}`;
+  const src = `apk%20belanja.html?v=shopping-management-20261025#${pageHash}`;
   return `
   <div class="shopping-page fade-in h-full min-h-[calc(100vh-4.5rem)] flex flex-col">
     <iframe

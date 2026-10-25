@@ -7,6 +7,7 @@
   <title>Pengeluaran Toko</title><!-- Tailwind CSS untuk styling -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="config.js"></script>
+  <script src="shopping-ui.js?v=shopping-management-20261025"></script>
   <script>
   const API_BASE = 'https://script.google.com/macros/s/AKfycbwptyGe3NGhzRNOXyyOESS2dzLB1waIm896pT38ngB8uajGZb-DVQ98X1ZUcVhRhh8yMQ/exec';
   const GAS_API_BASE = API_BASE;
@@ -300,6 +301,11 @@
 </div>
 </div>
      </div>
+     <div id="shoppingEditNotice" class="hidden p-3 mb-3 bg-red-50 border border-red-200 rounded-xl">
+      <p class="font-semibold text-red-800">Edit Laporan Belanja</p>
+      <p class="text-sm text-gray-500">Perubahan tersimpan pada laporan yang sama, bukan membuat belanja baru.</p>
+      <button id="cancelShoppingEdit" type="button" class="mt-2 text-sm font-semibold text-red-600">Batal Edit</button>
+     </div>
      <div class="grid grid-cols-2 gap-3"><button id="submitButton" class="py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"> <span id="submitButtonText">SUBMIT</span> </button> <button id="draftButton" class="py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors disabled:bg-gray-100 disabled:cursor-not-allowed"> <span id="draftButtonText">SIMPAN DRAFT</span> </button>
      </div>
     </div>
@@ -316,6 +322,11 @@
      <p id="emptyDraftText" class="text-gray-500 text-lg">Belum ada draft pengeluaran.</p>
     </div>
     <div id="draftCardsContainer" class="space-y-4"></div>
+    <section id="todayShoppingSection" class="hidden mt-6">
+      <div class="mb-3"><div class="flex items-center justify-between gap-2"><h2 class="text-lg font-bold text-red-900">Belanja Saya Hari Ini</h2><button id="refreshTodayShopping" type="button" class="text-sm font-semibold text-red-600">Muat Ulang</button></div>
+      <p class="text-sm text-gray-500">Belanja yang sudah disubmit hari ini (WIB). Klik card untuk detail dan foto.</p></div>
+      <div id="todayShoppingCards" class="space-y-3"></div>
+    </section>
    </div><!-- ADMIN PAGE -->
    <div id="adminPage" class="hidden max-w-2xl mx-auto p-6">
 
@@ -556,7 +567,9 @@ async function supabaseShoppingRequest(path, options = {}) {
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(body || res.statusText);
+    let message = body || res.statusText;
+    try { message = JSON.parse(body).message || message; } catch (_) { /* Non-JSON gateway response. */ }
+    throw new Error(message);
   }
 
   if (res.status === 204) return null;
@@ -617,7 +630,10 @@ function composeShoppingTransactions(expenses, itemRows, operationalRows) {
       foto_file_id: expense.foto_file_id || '',
       status: expense.status || 'draft',
       created_at: expense.created_at,
-      updated_at: expense.updated_at
+      updated_at: expense.updated_at,
+      created_by: expense.created_by,
+      user_name: expense.user_name,
+      submitted_at: expense.submitted_at
     };
   });
 }
@@ -631,95 +647,55 @@ async function loadShoppingDetails(expenseIds) {
   return { itemRows: itemRows || [], operationalRows: operationalRows || [] };
 }
 
-async function fetchShoppingTransactions(filters) {
-  const params = new URLSearchParams();
-  params.set('select', 'id,tempat_belanja,status,foto_url,foto_file_id,created_at,updated_at');
-  params.set('order', 'created_at.desc');
-  params.set('deleted_at', 'is.null');
+let shoppingActor = null;
+let editingReport = null;
+let currentShoppingVersion = null;
+let shoppingWriteBusy = false;
+let todayShoppingRows = [];
+let todayShoppingDay = '';
+let draftLoadGeneration = 0;
 
-  if (filters?.status) params.set('status', 'eq.' + filters.status);
-  if (filters?.startDate) params.set('created_at', 'gte.' + filters.startDate + 'T00:00:00.000Z');
-  if (filters?.endDate) params.append('created_at', 'lte.' + filters.endDate + 'T23:59:59.999Z');
-
-  const expenses = await supabaseShoppingRequest(shoppingTables.expenses + '?' + params.toString());
-  const ids = (expenses || []).map(function(row) { return row.id; });
-  const details = await loadShoppingDetails(ids);
-  return composeShoppingTransactions(expenses || [], details.itemRows, details.operationalRows);
+function shoppingCredentials() {
+  if (!shoppingActor?.id || !shoppingActor?.pin) throw new Error('Buka halaman belanja melalui akun aplikasi yang sudah login.');
+  return { p_actor_id:shoppingActor.id, p_actor_pin:shoppingActor.pin };
 }
-
+function isShoppingAdmin() { return shoppingActor?.role === 'admin'; }
+function notifyShoppingChanged() {
+  if (window.parent !== window) window.parent.postMessage({ type:'pizzain-shopping-changed' }, location.protocol === 'file:' ? '*' : location.origin);
+}
+async function shoppingRpc(name, parameters) {
+  if (navigator.onLine === false) throw new Error('Tidak terhubung internet. Data belum disimpan.');
+  return supabaseShoppingRequest('rpc/' + name, { method:'POST', body:JSON.stringify({ ...shoppingCredentials(), ...parameters }) });
+}
+async function fetchShoppingTransactions(filters = {}) {
+  const rows = await shoppingRpc('shopping_list_v1', {
+    p_status:filters.status || 'submitted', p_start_date:filters.startDate || null, p_end_date:filters.endDate || null
+  });
+  return (rows || []).map(row => ({ ...row, items:JSON.stringify(row.items || []), operasional:JSON.stringify(row.operasional || []) }));
+}
 async function saveShoppingTransaction(data, existingId) {
-  const id = existingId || genShoppingId();
-  const now = new Date().toISOString();
-  const expense = {
-    id: id,
-    tempat_belanja: data.tempat_belanja || '',
-    status: data.status || 'draft',
-    foto_url: data.foto_url || '',
-    foto_file_id: data.foto_file_id || '',
-    updated_at: now
-  };
-
-  if (existingId) {
-    await supabaseShoppingRequest(shoppingTables.expenses + '?id=eq.' + encodeFilter(id), {
-      method: 'PATCH',
-      headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify(expense)
+  if (shoppingWriteBusy) throw new Error('Penyimpanan masih berlangsung. Tunggu sampai selesai.');
+  shoppingWriteBusy = true;
+  // Retain a new form's ID after a lost response; never create a duplicate receipt on retry.
+  if (!existingId && !currentDraftId) currentDraftId = genShoppingId();
+  const id = existingId || currentDraftId;
+  try {
+    const result = await shoppingRpc('shopping_save_v1', {
+      p_expense:{ ...data, id, items:parseShoppingLines(data.items), operasional:parseShoppingLines(data.operasional) },
+      p_expected_updated_at:currentShoppingVersion
     });
-  } else {
-    expense.created_at = now;
-    await supabaseShoppingRequest(shoppingTables.expenses, {
-      method: 'POST',
-      headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify(expense)
-    });
-  }
-
-  await supabaseShoppingRequest(shoppingTables.items + '?expense_id=eq.' + encodeFilter(id), {
-    method: 'DELETE',
-    headers: { Prefer: 'return=minimal' }
-  });
-  await supabaseShoppingRequest(shoppingTables.operational + '?expense_id=eq.' + encodeFilter(id), {
-    method: 'DELETE',
-    headers: { Prefer: 'return=minimal' }
-  });
-
-  const itemRows = shoppingLineRows(id, data.items, 'item');
-  const operationalRows = shoppingLineRows(id, data.operasional, 'op');
-
-  if (itemRows.length) {
-    await supabaseShoppingRequest(shoppingTables.items, {
-      method: 'POST',
-      headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify(itemRows)
-    });
-  }
-
-  if (operationalRows.length) {
-    await supabaseShoppingRequest(shoppingTables.operational, {
-      method: 'POST',
-      headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify(operationalRows)
-    });
-  }
-
-  return { success: true, id: id };
+    currentShoppingVersion = result.updated_at;
+    notifyShoppingChanged();
+    return result;
+  } finally { shoppingWriteBusy = false; }
 }
-
-async function deleteShoppingTransaction(id) {
-  await supabaseShoppingRequest(shoppingTables.expenses + '?id=eq.' + encodeFilter(id), {
-    method: 'DELETE',
-    headers: { Prefer: 'return=minimal' }
-  });
-  return { success: true };
+async function deleteShoppingTransaction(id, version) {
+  const result = await shoppingRpc('shopping_delete_v1', { p_id:id, p_expected_updated_at:version });
+  notifyShoppingChanged();
+  return result;
 }
-
 async function loadShoppingSuggestions() {
-  const expenses = await supabaseShoppingRequest(shoppingTables.expenses + '?select=tempat_belanja&deleted_at=is.null&limit=2000');
-  const itemRows = await supabaseShoppingRequest(shoppingTables.items + '?select=name&limit=5000');
-  const operationalRows = await supabaseShoppingRequest(shoppingTables.operational + '?select=name&limit=5000');
-  const tempatBelanja = [...new Set((expenses || []).map(function(row) { return row.tempat_belanja; }).filter(Boolean))].sort();
-  const namaBarang = [...new Set([...(itemRows || []), ...(operationalRows || [])].map(function(row) { return row.name; }).filter(Boolean))].sort();
-  return { tempatBelanja: tempatBelanja, namaBarang: namaBarang };
+  return shoppingRpc('shopping_suggestions_v1', {});
 }
 
 
@@ -910,6 +886,7 @@ function navigate(page, push = true) {
      * ============================================
      */
     function showPage(page) {
+  if (page === 'admin' && !isShoppingAdmin()) page = shoppingActor ? 'draft' : 'home';
   currentPage = page;
 
   const pages = ['homePage', 'formPage', 'draftPage', 'adminPage'];
@@ -934,6 +911,11 @@ function navigate(page, push = true) {
   }
 
   if (page === 'draft') {
+    document.getElementById('draftPageTitle').textContent = isShoppingAdmin() ? 'Draf Belanja' : 'Draf & Belanja Hari Ini';
+    const emptyDraft = document.getElementById('emptyDraftState');
+    emptyDraft.classList.toggle('p-12', isShoppingAdmin());
+    emptyDraft.classList.toggle('p-4', !isShoppingAdmin());
+    emptyDraft.querySelector('svg').classList.toggle('hidden', !isShoppingAdmin());
     loadAllDrafts();
   }
 
@@ -1005,17 +987,74 @@ window.addEventListener('popstate', function (event) {
      * DRAFT FUNCTIONS
      * ============================================
      */
-    function loadAllDrafts() {
-  fetchShoppingTransactions({ status: 'draft' })
-    .then(data => {
-      allData = data;
-      renderDraftCards();
-    })
-    .catch(error => {
-      showToast('Error loading drafts: ' + error, 'error');
-    });
+    async function loadAllDrafts() {
+  if (!shoppingActor) return;
+  const generation = ++draftLoadGeneration;
+  const container = document.getElementById('todayShoppingCards');
+  container.textContent = 'Memuat belanja hari ini...';
+  todayShoppingRows = [];
+  todayShoppingDay = ShoppingUI.dateKey(new Date());
+  try {
+    const [drafts, submitted] = await Promise.all([
+      fetchShoppingTransactions({ status:'draft' }),
+      isShoppingAdmin() ? Promise.resolve([]) : fetchShoppingTransactions({ status:'submitted' })
+    ]);
+    if (generation !== draftLoadGeneration) return;
+    allData = drafts;
+    todayShoppingRows = submitted;
+    renderDraftCards();
+    renderTodayShopping();
+  } catch (error) {
+    if (generation !== draftLoadGeneration) return;
+    allData = [];
+    renderDraftCards();
+    container.textContent = 'Gagal memuat belanja hari ini. Buka ulang halaman untuk mencoba lagi.';
+    showToast(error.message, 'error');
+  }
 }
-
+function shoppingCardOptions() {
+  return { normalizePhoto:normalizeDriveImage, canManage:isShoppingAdmin(), onEdit:editShoppingReport, onDelete:deleteShoppingReport };
+}
+function renderTodayShopping() {
+  const section = document.getElementById('todayShoppingSection');
+  section.classList.toggle('hidden', isShoppingAdmin());
+  const container = document.getElementById('todayShoppingCards');
+  container.innerHTML = '';
+  todayShoppingRows.forEach(row => container.appendChild(ShoppingUI.createCard(row, shoppingCardOptions())));
+  if (!todayShoppingRows.length) container.textContent = 'Belum ada belanja yang kamu submit hari ini.';
+}
+function editShoppingReport(transaction) {
+  if (!isShoppingAdmin()) return;
+  if ((items.length || operasional.length || currentDraftId) && !confirm('Buka laporan ini untuk diedit? Isian form yang belum disimpan akan diganti.')) return;
+  resetForm();
+  editingReport = transaction;
+  currentDraftId = transaction.id;
+  currentShoppingVersion = transaction.updated_at;
+  document.getElementById('tempatBelanja').value = transaction.tempat_belanja;
+  items = parseShoppingLines(transaction.items);
+  operasional = parseShoppingLines(transaction.operasional);
+  currentPhoto = transaction.foto_url;
+  currentPhotoFileId = transaction.foto_file_id;
+  renderList(items, 'itemList', 'itemListContainer');
+  renderList(operasional, 'operasionalList', 'operasionalListContainer');
+  if (currentPhoto) renderPhotoPreview(currentPhoto);
+  document.getElementById('shoppingEditNotice').classList.remove('hidden');
+  document.getElementById('submitButtonText').textContent = 'SIMPAN PERUBAHAN';
+  document.getElementById('draftButton').classList.add('hidden');
+  navigate('form');
+}
+async function deleteShoppingReport(transaction, button) {
+  if (!isShoppingAdmin() || !confirm('Hapus laporan belanja ' + transaction.tempat_belanja + '? Laporan ini tidak akan tampil lagi.')) return;
+  button.disabled = true;
+  button.textContent = 'Menghapus...';
+  try {
+    await deleteShoppingTransaction(transaction.id, transaction.updated_at);
+    allPeriodTransactions = allPeriodTransactions.filter(row => row.id !== transaction.id);
+    filterTransactions(currentSearchKeyword);
+    showToast('Laporan belanja berhasil dihapus.', 'success');
+  } catch (error) { showToast(error.message, 'error'); }
+  finally { button.disabled = false; button.textContent = 'Hapus'; }
+}
 
     function renderDraftCards() {
   const drafts = Array.isArray(allData) ? allData : [];
@@ -1150,11 +1189,12 @@ function removeDraftFromList(draftId) {
 
  function deleteDraftById(draftId) {
 
-  removeDraftFromList(draftId);
-
-  deleteShoppingTransaction(draftId)
+  const draft = allData.find(row => row.id === draftId);
+  if (!draft) return;
+  deleteShoppingTransaction(draftId, draft.updated_at)
     .then(result => {
       if (result.success) {
+        removeDraftFromList(draftId);
         showToast('Draft berhasil dihapus!', 'success');
       } else {
         showToast(result.message, 'error');
@@ -1169,13 +1209,14 @@ function removeDraftFromList(draftId) {
 
 
     function loadDraftToForm(draft) {
-  currentDraftId = draft.id;
-
 if (draft.status !== 'draft') {
   showToast('Draft ini sudah disubmit', 'warning');
   return;
 }
 
+  resetForm();
+  currentDraftId = draft.id;
+  currentShoppingVersion = draft.updated_at;
   document.getElementById('tempatBelanja').value = draft.tempat_belanja;
 
   // =====================
@@ -1385,6 +1426,8 @@ function renderList(arr, listId, containerId) {
      * ============================================
      */
     function submitExpense(status) {
+      if (shoppingWriteBusy || document.getElementById('submitButton').disabled) return;
+      if (editingReport) status = 'submitted';
       const tempatBelanja = document.getElementById('tempatBelanja').value.trim();
 
       if (!tempatBelanja) {
@@ -1412,6 +1455,7 @@ if (status === 'submitted' && !currentPhoto) {
       
       submitBtn.disabled = true;
       draftBtn.disabled = true;
+      document.getElementById('cancelShoppingEdit').disabled = true;
       
       if (status === 'submitted') {
         submitBtnText.innerHTML = `
@@ -1445,6 +1489,7 @@ if (status === 'submitted' && !currentPhoto) {
 };
 
 
+      const wasEditingReport = Boolean(editingReport);
       const wasExistingDraft = Boolean(currentDraftId);
       saveShoppingTransaction(data, currentDraftId)
         .then(result => {
@@ -1452,6 +1497,7 @@ if (status === 'submitted' && !currentPhoto) {
   draftBtnText.textContent = originalDraftText;
   submitBtn.disabled = false;
   draftBtn.disabled = false;
+  document.getElementById('cancelShoppingEdit').disabled = false;
 
   if (result.success) {
     if (!currentDraftId) {
@@ -1465,12 +1511,13 @@ if (status === 'submitted' && !currentPhoto) {
     if (status === 'draft') {
       showToast(wasExistingDraft ? 'Draft berhasil diperbarui!' : 'Draft berhasil disimpan!', 'success');
     } else {
-      showToast('Pengeluaran berhasil disimpan!', 'success');
+      showToast(wasEditingReport ? 'Laporan belanja berhasil diperbarui!' : 'Pengeluaran berhasil disimpan!', 'success');
     }
 
     setTimeout(function() {
       resetForm();
-      navigate('form');
+      navigate(wasEditingReport ? 'admin' : 'form');
+      if (wasEditingReport) loadPeriodReport();
     }, 1000);
   } else {
     showToast(result.message, 'error');
@@ -1481,11 +1528,17 @@ if (status === 'submitted' && !currentPhoto) {
   draftBtnText.textContent = originalDraftText;
   submitBtn.disabled = false;
   draftBtn.disabled = false;
+  document.getElementById('cancelShoppingEdit').disabled = false;
   showToast('Error: ' + error, 'error');
 });
     }
 
 function resetForm() {
+  editingReport = null;
+  currentShoppingVersion = null;
+  document.getElementById('shoppingEditNotice').classList.add('hidden');
+  document.getElementById('submitButtonText').textContent = 'SUBMIT';
+  document.getElementById('draftButton').classList.remove('hidden');
   document.getElementById('tempatBelanja').value = '';
   document.getElementById('namaBarang').value = '';
   document.getElementById('hargaBarang').value = '';
@@ -2185,348 +2238,37 @@ if (operasionalAmountEl && operasionalCountEl) {
      * PERUBAHAN UTAMA: Render daily cards dengan design red card
      */
     function renderTransactions(transactions) {
- document.getElementById('periodTotalTransactions').textContent =
-    transactions.length;
-     
-      const container = document.getElementById('transactionsList');
-      const emptyState = document.getElementById('emptyState');
-
-      if (transactions.length === 0) {
-        container.innerHTML = '';
-        emptyState.classList.remove('hidden');
-        return;
-      }
-
-      emptyState.classList.add('hidden');
-      container.innerHTML = '';
-
-      transactions.sort(function(a, b) {
-        return new Date(b.created_at) - new Date(a.created_at);
-      });
-
-      const isMultiDay = startDate !== endDate;
-
-      if (isMultiDay) {
-        const groupedByDate = {};
-        
-        transactions.forEach(function(transaction) {
-          const bahan = transaction.items
-  ? JSON.parse(transaction.items)
-  : [];
-
-const operasional = transaction.operasional
-  ? JSON.parse(transaction.operasional)
-  : [];
-
-          const dateKey = new Date(transaction.created_at).toISOString().split('T')[0];
-          if (!groupedByDate[dateKey]) {
-            groupedByDate[dateKey] = [];
-          }
-          groupedByDate[dateKey].push(transaction);
-        });
-
-        Object.keys(groupedByDate).sort(function(a, b) {
-          return new Date(b) - new Date(a);
-        }).forEach(function(dateKey) {
-          const dailyTransactions = groupedByDate[dateKey];
-          const dateObj = new Date(dateKey);
-          const tanggal = dateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
-          
-          let dailyTotal = 0;
-
-dailyTransactions.forEach(function(t) {
-  const bahan = t.items ? JSON.parse(t.items) : [];
-  const operasional = t.operasional ? JSON.parse(t.operasional) : [];
-
-  bahan.forEach(function(item) {
-    dailyTotal += item[3];
+  document.getElementById('periodTotalTransactions').textContent = transactions.length;
+  const container = document.getElementById('transactionsList');
+  document.getElementById('emptyState').classList.toggle('hidden', transactions.length > 0);
+  container.innerHTML = '';
+  const sorted = [...transactions].sort((a,b) => new Date(ShoppingUI.timestamp(b)) - new Date(ShoppingUI.timestamp(a)));
+  if (startDate === endDate) {
+    sorted.forEach(transaction => container.appendChild(ShoppingUI.createCard(transaction, shoppingCardOptions())));
+    return;
+  }
+  const groups = new Map();
+  sorted.forEach(transaction => {
+    const day = ShoppingUI.dateKey(ShoppingUI.timestamp(transaction));
+    if (!groups.has(day)) groups.set(day, []);
+    groups.get(day).push(transaction);
   });
-
-  operasional.forEach(function(item) {
-    dailyTotal += item[3];
+  groups.forEach((rows, day) => {
+    const dayCard = document.createElement('div');
+    dayCard.className = 'bg-gradient-to-r from-red-500 to-red-600 rounded-2xl shadow-lg overflow-hidden';
+    const date = new Date(day + 'T12:00:00+07:00').toLocaleDateString('id-ID', { timeZone:'Asia/Jakarta', day:'numeric', month:'long', year:'numeric' });
+    dayCard.innerHTML = `<button type="button" class="shopping-day-toggle w-full px-3 py-2 text-white text-left flex items-center justify-between gap-3" aria-expanded="false"><span><span class="block text-base">${date}</span><span class="block text-2xl font-bold">${ShoppingUI.amount(rows.reduce((sum,row) => sum + ShoppingUI.total(row),0))}</span><span class="text-sm">Total Belanja</span></span><span class="bg-white bg-opacity-20 rounded-xl px-4 py-2 text-center"><span class="block text-xl font-bold">${new Set(rows.map(row => row.tempat_belanja)).size}</span><span class="text-xs">Tempat</span></span></button><div class="hidden daily-detail-section p-3 space-y-3 bg-gray-50"></div>`;
+    const details = dayCard.querySelector('.daily-detail-section');
+    rows.forEach(row => details.appendChild(ShoppingUI.createCard(row, shoppingCardOptions())));
+    const toggle = dayCard.querySelector('.shopping-day-toggle');
+    toggle.addEventListener('click', () => {
+      const expanded = toggle.getAttribute('aria-expanded') !== 'true';
+      toggle.setAttribute('aria-expanded', String(expanded));
+      details.classList.toggle('hidden', !expanded);
+    });
+    container.appendChild(dayCard);
   });
-});
-
-
-          // HITUNG JUMLAH TEMPAT BELANJA UNIK
-          const uniquePlaces = new Set();
-          dailyTransactions.forEach(function(t) {
-            uniquePlaces.add(t.tempat_belanja);
-          });
-          const uniquePlacesCount = uniquePlaces.size;
-
-          const dayCard = document.createElement('div');
-dayCard.className = `
-  bg-gradient-to-r from-red-500 to-red-600
-  rounded-2xl
-  shadow-lg
-  overflow-hidden
-`;
-
-
-
-          
-          // DESIGN RED CARD UNTUK DAILY SUMMARY
-          dayCard.innerHTML = `
-  <div class="px-3 py-2 text-white">
-    <div class="flex items-center justify-between gap-3">
-
-      <!-- KIRI -->
-      <div class="flex-1 min-w-0">
-        <!-- Tanggal -->
-        <div class="flex items-center gap-2 leading-none mb-1">
-          <svg class="w-6 h-6 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-          </svg>
-          <p class="font-normal text-base truncate">
-            ${tanggal}
-          </p>
-        </div>
-
-        <!-- Nominal -->
-        <p class="text-2xl font-bold leading-tight">
-          Rp ${dailyTotal.toLocaleString('id-ID')}
-        </p>
-
-        <!-- Label -->
-        <p class="text-sm opacity-90 leading-tight">
-          Total Belanja
-        </p>
-      </div>
-
-      <!-- KANAN : BADGE TEMPAT -->
-      <div
-        class="flex flex-col items-center justify-center
-               bg-white bg-opacity-20
-               rounded-xl
-               px-4 py-2
-               text-center">
-
-        <p class="text-2xl font-bold leading-none">
-          ${uniquePlacesCount}
-        </p>
-        <p class="text-xs opacity-90 leading-none mt-0.5">
-          Tempat
-        </p>
-      </div>
-
-    </div>
-  </div>
-
-  <div class="hidden daily-detail-section p-4 space-y-3 bg-gray-50">
-  </div>
-`;
-
-
-          const detailSection = dayCard.querySelector('.daily-detail-section');
-          
-          dailyTransactions.forEach(function(transaction) {
-            const bahan = transaction.items
-  ? JSON.parse(transaction.items)
-  : [];
-
-const operasional = transaction.operasional
-  ? JSON.parse(transaction.operasional)
-  : [];
-
-            const timeObj = new Date(transaction.created_at);
-            const waktu = timeObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-            
-            let transactionTotal = 0;
-
-bahan.forEach(item => {
-  transactionTotal += item[3];
-});
-
-operasional.forEach(item => {
-  transactionTotal += item[3];
-});
-
-
-            const transactionCard = document.createElement('div');
-            transactionCard.className = 'border-2 border-gray-200 rounded-lg p-3 hover:border-red-400 transition-all cursor-pointer bg-white';
-            
-            transactionCard.innerHTML = `
-              <div class="flex items-start justify-between mb-2">
-                <div class="flex-1">
-                  <div class="flex items-center gap-2 mb-1">
-                    <svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
-                    </svg>
-                    <p class="font-bold text-gray-800 text-sm">${transaction.tempat_belanja}</p>
-                  </div>
-                  <div class="flex items-center gap-2 text-xs text-gray-500 ml-6">
-                    <span>Jam ${waktu}</span>
-                  </div>
-                </div>
-                <div class="text-right">
-                  <p class="text-base font-bold text-red-600">Rp ${transactionTotal.toLocaleString('id-ID')}</p>
-                  <p class="text-xs text-gray-500">
-  ${bahan.length + operasional.length} item
-</p>
-
-                </div>
-              </div>
-              <div class="hidden transaction-detail-section mt-2 pt-2 border-t border-gray-200">
-               <p class="text-xs font-semibold text-gray-700 mb-1">Bahan Baku:</p>
-${bahan.length === 0
-  ? '<div class="text-xs text-gray-400 ml-2 mb-1">- Tidak ada</div>'
-  : bahan.map(item => `
-      <div class="flex justify-between text-xs text-gray-600 mb-1 ml-2">
-        <span>- ${item[0]} (${item[1]}x @ Rp ${item[2].toLocaleString('id-ID')})</span>
-        <span class="font-semibold">Rp ${item[3].toLocaleString('id-ID')}</span>
-      </div>
-    `).join('')
 }
-
-<p class="text-xs font-semibold text-gray-700 mt-2 mb-1">Operasional:</p>
-${operasional.length === 0
-  ? '<div class="text-xs text-gray-400 ml-2">- Tidak ada</div>'
-  : operasional.map(item => `
-      <div class="flex justify-between text-xs text-gray-600 mb-1 ml-2">
-        <span>- ${item[0]} (${item[1]}x @ Rp ${item[2].toLocaleString('id-ID')})</span>
-        <span class="font-semibold">Rp ${item[3].toLocaleString('id-ID')}</span>
-      </div>
-    `).join('')
-}
-
-                ${transaction.foto_url ? `
-                  <div class="mt-3">
-  <p class="text-sm font-semibold text-gray-700 mb-2">Foto Bukti:</p>
-
-  <div class="w-full aspect-[3/4] bg-black overflow-hidden rounded-xl border-2 border-gray-200">
-    <img src="${normalizeDriveImage(transaction.foto_url)}"
-         referrerpolicy="no-referrer"
-         class="w-full h-full object-cover"
-         alt="Bukti belanja">
-                  </div>
-                ` : ''}
-              </div>
-            `;
-
-            transactionCard.addEventListener('click', function(e) {
-              e.stopPropagation();
-              const transDetail = transactionCard.querySelector('.transaction-detail-section');
-              transDetail.classList.toggle('hidden');
-            });
-
-            detailSection.appendChild(transactionCard);
-          });
-
-          dayCard.addEventListener('click', function() {
-            detailSection.classList.toggle('hidden');
-          });
-
-          container.appendChild(dayCard);
-        });
-
-      } else {
-        transactions.forEach(function(transaction) {
-          const bahan = transaction.items
-  ? JSON.parse(transaction.items)
-  : [];
-
-const operasional = transaction.operasional
-  ? JSON.parse(transaction.operasional)
-  : [];
-
-          const dateObj = new Date(transaction.created_at);
-          const tanggal = dateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
-          const waktu = dateObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-          
-          let transactionTotal = 0;
-bahan.forEach(item => transactionTotal += item[3]);
-operasional.forEach(item => transactionTotal += item[3]);
-
-
-          const card = document.createElement('div');
-          card.className = 'border-2 border-gray-200 rounded-xl p-4 hover:border-red-400 transition-all cursor-pointer';
-          
-          card.innerHTML = `
-            <div class="flex items-start justify-between mb-3">
-              <div class="flex-1">
-                <div class="flex items-center gap-2 mb-1">
-                  <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
-                  </svg>
-                  <p class="font-bold text-gray-800">
-  ${highlight(transaction.tempat_belanja, adminInput.value)}
-</p>
-                </div>
-                <div class="flex items-center gap-3 text-sm text-gray-500 ml-7">
-                  <span>Tanggal ${tanggal}</span>
-                  <span>Jam ${waktu}</span>
-                </div>
-              </div>
-              <div class="text-right">
-                <p class="text-lg font-bold text-red-600">Rp ${transactionTotal.toLocaleString('id-ID')}</p>
-                <p class="text-xs text-gray-500">
-  ${bahan.length + operasional.length} item
-</p>
-
-              </div>
-            </div>
-            <div class="hidden detail-section mt-3 pt-3 border-t border-gray-200">
-              <div class="text-sm font-semibold text-gray-700 mb-2">
-  Bahan Baku:
-</div>
-
-${bahan.length === 0
-  ? '<div class="text-xs text-gray-400 mb-2 ml-2">- Tidak ada</div>'
-  : bahan.map(item => `
-      <div class="flex justify-between text-sm text-gray-600 mb-1 ml-2">
-        <span>- ${item[0]} (${item[1]}x @ Rp ${item[2].toLocaleString('id-ID')})</span>
-        <span class="font-semibold">
-          Rp ${item[3].toLocaleString('id-ID')}
-        </span>
-      </div>
-    `).join('')
-}
-
-<div class="text-sm font-semibold text-gray-700 mt-3 mb-2">
-  Operasional:
-</div>
-
-${operasional.length === 0
-  ? '<div class="text-xs text-gray-400 mb-1 ml-2">- Tidak ada</div>'
-  : operasional.map(item => `
-      <div class="flex justify-between text-sm text-gray-600 mb-1 ml-2">
-        <span>- ${item[0]} (${item[1]}x @ Rp ${item[2].toLocaleString('id-ID')})</span>
-        <span class="font-semibold">
-          Rp ${item[3].toLocaleString('id-ID')}
-        </span>
-      </div>
-    `).join('')
-}
-
-              ${transaction.foto_url ? `
-  <div class="mt-3">
-  <p class="text-sm font-semibold text-gray-700 mb-2">Foto Bukti:</p>
-
-  <div class="w-full aspect-[3/4] bg-black overflow-hidden rounded-xl border-2 border-gray-200">
-    <img src="${normalizeDriveImage(transaction.foto_url)}"
-         referrerpolicy="no-referrer"
-         class="w-full h-full object-cover"
-         alt="Bukti belanja">
-  </div>
-</div>
-
-` : ''}
-            </div>
-          `;
-
-          card.addEventListener('click', function() {
-            const detailSection = card.querySelector('.detail-section');
-            detailSection.classList.toggle('hidden');
-          });
-
-          container.appendChild(card);
-        });
-      }
-    }
 
     /**
      * ============================================
@@ -2570,8 +2312,9 @@ document.getElementById('addOperasionalButton')
       });
       
       document.getElementById('backButton').addEventListener('click', function() {
+        const wasEditing = Boolean(editingReport);
         resetForm();
-        navigate('home');
+        navigate(wasEditing ? 'admin' : 'home');
       });
 
       document.getElementById('backToDraftButton').addEventListener('click', function() {
@@ -2602,7 +2345,7 @@ document.getElementById('addOperasionalButton')
         }
       });
 
-      const today = new Date().toISOString().split('T')[0];
+      const today = ShoppingUI.dateKey(new Date());
       document.getElementById('startDateSelector').value = today;
       document.getElementById('endDateSelector').value = today;
 
@@ -2688,16 +2431,47 @@ function selectBarang(val) {
      */
     (function init() {
   initEventListeners();
-  preloadSuggestions();
-
-  // PRELOAD DRAFT DI BACKGROUND
-  loadAllDrafts();
-
-  const hash = location.hash.replace('#', '');
-  const page = hash || 'home';
-
-  history.replaceState({ page }, '', '#' + page);
-  showPage(page);
+  document.getElementById('cancelShoppingEdit').addEventListener('click', () => {
+    if (shoppingWriteBusy || document.getElementById('submitButton').disabled) return;
+    resetForm();
+    navigate('admin');
+  });
+  document.getElementById('refreshTodayShopping').addEventListener('click', async event => {
+    event.currentTarget.disabled = true;
+    try { await loadAllDrafts(); } finally { document.getElementById('refreshTodayShopping').disabled = false; }
+  });
+  window.addEventListener('message', event => {
+    if (event.source !== window.parent || window.parent === window) return;
+    if (location.protocol !== 'file:' && event.origin !== location.origin) return;
+    if (event.data?.type !== 'pizzain-shopping-session') return;
+    shoppingActor = event.data.user;
+    resetForm();
+    allData = [];
+    todayShoppingRows = [];
+    renderDraftCards();
+    renderTodayShopping();
+    const page = location.hash.replace('#','') || 'form';
+    history.replaceState({ page }, '', '#' + page);
+    showPage(shoppingActor ? page : 'home');
+    if (shoppingActor) preloadSuggestions();
+  });
+  // Expire yesterday's staff cards even if the page stays open across midnight.
+  setInterval(() => {
+    if (currentPage === 'draft' && shoppingActor && todayShoppingDay !== ShoppingUI.dateKey(new Date())) {
+      todayShoppingRows = [];
+      renderTodayShopping();
+      loadAllDrafts();
+    }
+  }, 15000);
+  window.addEventListener('focus', () => {
+    if (currentPage === 'draft' && shoppingActor) loadAllDrafts();
+  });
+  showPage('home');
+  if (window.parent !== window) {
+    window.parent.postMessage({ type:'pizzain-shopping-ready' }, location.protocol === 'file:' ? '*' : location.origin);
+  } else {
+    showToast('Buka Input Belanja / Draf Belanja melalui index.html dan login terlebih dahulu.', 'info');
+  }
 })();
 
 
@@ -2777,6 +2551,8 @@ ctx.drawImage(
 
   document.getElementById('uploadSpinner').classList.remove('hidden');
 
+  document.getElementById('submitButton').disabled = true;
+  document.getElementById('draftButton').disabled = true;
   const fd = new FormData();
   fd.append('action', 'uploadPhoto');
   fd.append('base64', base64Data);
@@ -2800,9 +2576,9 @@ ctx.drawImage(
   // AUTO SAVE FOTO KE DATABASE
   const tempat = document.getElementById('tempatBelanja').value.trim();
 
-  if (tempat) {
+  if (tempat && !editingReport) {
 
-    saveShoppingTransaction({
+    await saveShoppingTransaction({
       tempat_belanja: tempat,
       items: JSON.stringify(items || []),
       operasional: JSON.stringify(operasional || []),
@@ -2831,6 +2607,8 @@ ctx.drawImage(
     showToast('Gagal upload foto', 'error');
   } finally {
     document.getElementById('uploadSpinner').classList.add('hidden');
+    document.getElementById('submitButton').disabled = false;
+    document.getElementById('draftButton').disabled = false;
   }
 }
 
